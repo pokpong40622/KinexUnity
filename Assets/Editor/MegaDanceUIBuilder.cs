@@ -84,6 +84,7 @@ namespace Kinex.MegaDance.EditorTools
                 var c = canvas.transform.GetChild(i);
                 if (c.name == "BackButton") c.gameObject.SetActive(false);
                 if (c.name == "SettingsGear") Object.DestroyImmediate(c.gameObject);
+                if (c.name == "DebugNextButton") Object.DestroyImmediate(c.gameObject);
             }
 
             // Calibration popup (created/refreshed here) + the gear that opens it. Built before the
@@ -99,10 +100,11 @@ namespace Kinex.MegaDance.EditorTools
             Outline(megaTitle, OutlineGray, 0.25f);
             var startBtn = AddSpriteButton(startPanel.transform, "StartButton", startSprite, manager);
             Place(startBtn, 220, 1180, 487, 195);
-            // Gear opens the calibration popup. Sits just below the top-right corner preview.
+            // Gear opens the calibration popup. Tucked under the back button (top-left) so it
+            // stays clear of the MEGA DANCE title.
             var gear = AddImage(startPanel.transform, "SettingsGear", LoadSprite(GearSpritePath), Color.white);
             gear.raycastTarget = true;
-            Place(gear.rectTransform, 762, 380, 110, 110);
+            Place(gear.rectTransform, 58, 240, 108, 108);
             var gearBtn = gear.gameObject.AddComponent<Button>();
             if (calPanel != null) UnityEditor.Events.UnityEventTools.AddPersistentListener(gearBtn.onClick, calPanel.Open);
 
@@ -110,27 +112,31 @@ namespace Kinex.MegaDance.EditorTools
             // White card (border sprite) holds: title, "Do this pose", the target-pose image,
             // and the big get-ready countdown overlay.
             AddBackButton(firstPose.transform, backSprite);
-            var card = AddImage(firstPose.transform, "Card", cardSprite, Color.white);
-            Place(card.rectTransform, 38, 70, 851, 1290);
+            // Smaller, centred, see-through card so the live 3D room shows both around AND through it
+            // — it reads as a popup floating over the same room as the Start/Playing screens (Figma).
+            var card = AddImage(firstPose.transform, "Card", cardSprite, new Color(1f, 1f, 1f, 0.82f));
+            Place(card.rectTransform, 110, 250, 707, 970);
+
+            // Dark fill so it reads on the card; light outline for a slight pop.
+            var fpTitle = AddText(firstPose.transform, "Pose 1", black, 78, FontStyles.Normal,
+                                  new Color32(0x2A, 0x2A, 0x2A, 0xFF), TextAlignmentOptions.Center);
+            Place(fpTitle.rectTransform, 140, 285, 647, 95);
+            Outline(fpTitle, Color.white, 0.12f);
+
+            var doThis = AddText(firstPose.transform, "Do this pose", semi, 44, FontStyles.Normal,
+                                 new Color32(0x22, 0x22, 0x22, 0xFF), TextAlignmentOptions.Center);
+            Place(doThis.rectTransform, 140, 390, 647, 60);
 
             var poseImg = AddImage(firstPose.transform, "PoseImage", null, Color.white);
             poseImg.preserveAspect = true;
-            Place(poseImg.rectTransform, 110, 300, 707, 1010);
+            Place(poseImg.rectTransform, 175, 460, 577, 730);
 
-            // Dark fill (not white) so it reads clearly on the white card; light outline for a slight pop.
-            var fpTitle = AddText(firstPose.transform, "Pose 1", black, 92, FontStyles.Normal,
-                                  new Color32(0x2A, 0x2A, 0x2A, 0xFF), TextAlignmentOptions.Center);
-            Place(fpTitle.rectTransform, 100, 120, 727, 120);
-            Outline(fpTitle, Color.white, 0.12f);
-
-            var doThis = AddText(firstPose.transform, "Do this pose", semi, 50, FontStyles.Normal,
-                                 new Color32(0x22, 0x22, 0x22, 0xFF), TextAlignmentOptions.Center);
-            Place(doThis.rectTransform, 100, 235, 727, 80);
-
-            var countdown = AddText(firstPose.transform, "3", black, 360, FontStyles.Normal,
-                                    Color.white, TextAlignmentOptions.Center);
-            Place(countdown.rectTransform, 213, 470, 500, 500);
-            Outline(countdown, new Color32(0x1A, 0x1A, 0x1A, 0xFF), 0.35f); // dark outline: visible on white card AND dark figure
+            // Green countdown (not white) so it never blends into the white card; dark-green outline
+            // keeps it readable over the dark figure too.
+            var countdown = AddText(firstPose.transform, "3", black, 300, FontStyles.Normal,
+                                    Green, TextAlignmentOptions.Center);
+            Place(countdown.rectTransform, 313, 600, 300, 270);
+            Outline(countdown, new Color32(0x10, 0x3A, 0x05, 0xFF), 0.3f);
 
             // =================== PLAYING (HUD) ===================
             // Camera feed shows behind. Top title, bottom percentage strip, thin match bar.
@@ -189,6 +195,20 @@ namespace Kinex.MegaDance.EditorTools
 
             // Always-on small camera+skeleton preview in the top-right corner (on top of everything).
             BuildCornerPreview(canvas);
+
+            // TEMP debug button (bottom-left): skip straight to the next pose for testing. Remove later.
+            // Hidden by default; MegaDanceManager only shows it while a game is in progress.
+            var dbg = AddImage(canvas.transform, "DebugNextButton", null, new Color(0.12f, 0.12f, 0.12f, 0.75f));
+            dbg.raycastTarget = true;
+            Place(dbg.rectTransform, 45, 1295, 250, 95);
+            var dbgBtn = dbg.gameObject.AddComponent<Button>();
+            UnityEditor.Events.UnityEventTools.AddPersistentListener(dbgBtn.onClick, manager.SkipPose);
+            var dbgLbl = AddText(dbg.transform, "NEXT ▶", semi, 36, FontStyles.Bold, Color.white, TextAlignmentOptions.Center);
+            Stretch(dbgLbl.rectTransform);
+            var dso = new SerializedObject(manager);
+            dso.FindProperty("debugNextButton").objectReferenceValue = dbg.gameObject;
+            dso.ApplyModifiedPropertiesWithoutUndo();
+            dbg.gameObject.SetActive(false);
 
             // Default visible panel = Start; others off.
             startPanel.SetActive(true); firstPose.SetActive(false);

@@ -30,8 +30,9 @@ namespace Kinex.MegaDance
         public bool useKeyboardStub = true;
         [Tooltip("Live keypoint source. Only used when useKeyboardStub is false.")]
         public MediaPipePoseDetector poseDetector;
-        [Tooltip("Closeness needed to clear a pose. 0.95 = within ±5% of the target.")]
-        [Range(0f, 1f)] public float passThreshold = 0.95f;
+        [Tooltip("Closeness needed to clear a pose. 0.70 = within ~30% of the target (real poses are " +
+                 "hard to hit at 90%+).")]
+        [Range(0f, 1f)] public float passThreshold = 0.70f;
         [Tooltip("Per-limb angle tolerance (degrees). Bigger = more forgiving.")]
         public float toleranceDegrees = 45f;
         [Range(0f, 1f)] public float minConfidence = 0.3f;
@@ -58,13 +59,19 @@ namespace Kinex.MegaDance
         public Image matchBarFill;           // HUD bar, fillAmount 0..1 = live score
         public TMP_Text correctPoseNameText; // small name under big "Correct!"
 
+        [Header("Debug (temporary)")]
+        [Tooltip("The 'NEXT' skip button — shown only while a game is in progress.")]
+        public GameObject debugNextButton;
+
         State _state = State.Idle;
+        int _poseIndex;                      // current target pose; trainer animates to it on EnterPlaying
         float[][] _signatures;               // [pose][8] baked angle targets
         readonly PoseSignatureBaker _baker = new PoseSignatureBaker();
 
         void Start()
         {
             ShowOnly(startPanel);
+            if (debugNextButton != null) debugNextButton.SetActive(false); // hidden on the Start screen
             _state = State.Idle;
         }
 
@@ -73,6 +80,7 @@ namespace Kinex.MegaDance
         {
             if (trainer == null) { Debug.LogError("[MegaDanceManager] trainer not assigned."); return; }
             trainer.autoAdvance = false; // the manager controls progression, not the trainer
+            if (debugNextButton != null) debugNextButton.SetActive(true); // visible once the game starts
             BakeSignatures();
             GoToFirstPose(0);
         }
@@ -88,13 +96,19 @@ namespace Kinex.MegaDance
                 trainer.ApplyPoseImmediate(i);
                 _signatures[i] = _baker.BakeFromRig(trainer.Animator);
             }
-            trainer.ApplyPoseImmediate(0); // leave the rig on pose 0
+            // Leave the rig on the LAST pose (not pose 0) so the very first pose also animates
+            // (pose 0's target would otherwise already be showing). It's hidden behind the
+            // FirstPose card anyway, then blends into pose 0 when Playing starts.
+            trainer.ApplyPoseImmediate(n - 1);
         }
 
         // ---- FirstPose: show the target pose image, run the get-ready countdown. ----
+        // The trainer does NOT move here — it animates into the pose when the popup closes
+        // (EnterPlaying), so the player actually watches the movement instead of missing it
+        // behind the card.
         void GoToFirstPose(int index)
         {
-            trainer.ShowPose(index);
+            _poseIndex = index;
             if (poseNameText != null)    poseNameText.text = $"Pose {index + 1}";
             if (poseCounterText != null) poseCounterText.text = $"{index + 1}/{trainer.PoseCount}";
             if (poseImage != null)
@@ -121,6 +135,7 @@ namespace Kinex.MegaDance
         // ---- Playing: live scoring; first frame at/above passThreshold locks the pose. ----
         void EnterPlaying()
         {
+            trainer.ShowPose(_poseIndex); // animate into the pose now that the card is gone (visible)
             SetPanels(instruction: false, hud: true, correct: false, results: false, start: false);
             if (matchBarFill != null) matchBarFill.fillAmount = 0f;
             if (percentText != null)  percentText.text = "0%";
@@ -164,10 +179,22 @@ namespace Kinex.MegaDance
             else GoToFirstPose(next);
         }
 
+        /// <summary>DEBUG: jump straight to the next pose from any state (skips scoring). Wired to a
+        /// temporary on-screen "NEXT" button for testing animations/flow. Safe to remove later.</summary>
+        public void SkipPose()
+        {
+            if (trainer == null) return;
+            StopAllCoroutines();
+            int next = trainer.CurrentPose + 1;
+            if (next >= trainer.PoseCount) ShowResults();
+            else GoToFirstPose(next);
+        }
+
         void ShowResults()
         {
             _state = State.Results;
             SetPanels(instruction: false, hud: false, correct: false, results: true, start: false);
+            if (debugNextButton != null) debugNextButton.SetActive(false); // game over — hide skip
             Debug.Log("[MegaDanceManager] All poses complete!");
         }
 
