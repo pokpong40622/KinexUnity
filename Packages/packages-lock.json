@@ -19,6 +19,13 @@
         "com.unity.test-framework": "1.0.0"
       }
     },
+    "com.learntoflutter.flutter_embed_unity_6000_0": {
+      "version": "https://github.com/learntoflutter/flutter_embed_unity.git?path=example_unity_6000_0_project/Assets/FlutterEmbed",
+      "depth": 0,
+      "source": "git",
+      "dependencies": {},
+      "hash": "32d6b2d28c15616a274853631942dcff4dcffed2"
+    },
     "com.unity.ai.inference": {
       "version": "2.5.0",
       "depth": 0,

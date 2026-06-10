@@ -182,35 +182,6 @@ public class MediaPipePoseDetector : MonoBehaviour
         LatestKeypoints = new Vector2[17];
         LatestConfidence = new float[17];
 
-        string modelPath = System.IO.Path.Combine(Application.streamingAssetsPath, modelFileName);
-        bool modelExists = System.IO.File.Exists(modelPath);
-        Debug.Log($"[MediaPipePoseDetector] Model path: '{modelPath}' | exists={modelExists}");
-        if (!modelExists)
-        {
-            Debug.LogError($"[MediaPipePoseDetector] Model file NOT FOUND at '{modelPath}'. " +
-                           "Copy pose_landmarker_full.bytes into Assets/StreamingAssets/ and try again.");
-            return;
-        }
-
-        try
-        {
-            var baseOptions = new BaseOptions(modelAssetPath: modelPath);
-            var options = new PoseLandmarkerOptions(
-                baseOptions,
-                runningMode: RunningMode.VIDEO,
-                numPoses: 1,
-                minPoseDetectionConfidence: minDetectionConfidence,
-                minPosePresenceConfidence: minDetectionConfidence,
-                minTrackingConfidence: minDetectionConfidence,
-                outputSegmentationMasks: false);
-            _landmarker = PoseLandmarker.CreateFromOptions(options);
-            Debug.Log($"[MediaPipePoseDetector] Landmarker created: {(_landmarker != null ? "OK" : "null (CreateFromOptions returned null)")}");
-        }
-        catch (System.Exception ex)
-        {
-            Debug.LogError($"[MediaPipePoseDetector] CreateFromOptions FAILED: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
-        }
-
         _rawImage = FindAnyObjectByType<UnityEngine.UI.RawImage>();
 
         if (testVideoClip != null)
@@ -242,6 +213,66 @@ public class MediaPipePoseDetector : MonoBehaviour
                 : new WebCamTexture(640, 480, 30);
             _webcam.Play();
             if (_rawImage != null) _rawImage.texture = _webcam;
+        }
+
+        // Model load is async-capable so it works on Android, where StreamingAssets live inside the
+        // APK and can't be read with System.IO. See InitLandmarker.
+        StartCoroutine(InitLandmarker());
+    }
+
+    // Loads the pose model and creates the landmarker. On Android, Application.streamingAssetsPath
+    // is a "jar:file://...apk!/assets" URL that System.IO can't open, so the bytes must come through
+    // UnityWebRequest; desktop/editor read the file directly. Either way we hand MediaPipe the raw
+    // bytes via modelAssetBuffer, which is platform-independent.
+    System.Collections.IEnumerator InitLandmarker()
+    {
+        string modelPath = System.IO.Path.Combine(Application.streamingAssetsPath, modelFileName);
+        byte[] modelBytes = null;
+
+        if (modelPath.Contains("://"))
+        {
+            // Inside the APK (Android) — read via UnityWebRequest.
+            using (var req = UnityEngine.Networking.UnityWebRequest.Get(modelPath))
+            {
+                yield return req.SendWebRequest();
+                if (req.result != UnityEngine.Networking.UnityWebRequest.Result.Success)
+                {
+                    Debug.LogError($"[MediaPipePoseDetector] Model load FAILED from '{modelPath}': {req.error}");
+                    yield break;
+                }
+                modelBytes = req.downloadHandler.data;
+            }
+        }
+        else
+        {
+            if (!System.IO.File.Exists(modelPath))
+            {
+                Debug.LogError($"[MediaPipePoseDetector] Model file NOT FOUND at '{modelPath}'. " +
+                               "Copy pose_landmarker_full.bytes into Assets/StreamingAssets/ and try again.");
+                yield break;
+            }
+            modelBytes = System.IO.File.ReadAllBytes(modelPath);
+        }
+        Debug.Log($"[MediaPipePoseDetector] Model bytes loaded: {(modelBytes != null ? modelBytes.Length.ToString() : "null")} from '{modelPath}'");
+
+        try
+        {
+            var baseOptions = new BaseOptions(modelAssetBuffer: modelBytes);
+            var options = new PoseLandmarkerOptions(
+                baseOptions,
+                runningMode: RunningMode.VIDEO,
+                numPoses: 1,
+                minPoseDetectionConfidence: minDetectionConfidence,
+                minPosePresenceConfidence: minDetectionConfidence,
+                minTrackingConfidence: minDetectionConfidence,
+                outputSegmentationMasks: false);
+            _landmarker = PoseLandmarker.CreateFromOptions(options);
+            Debug.Log($"[MediaPipePoseDetector] Landmarker created: {(_landmarker != null ? "OK" : "null (CreateFromOptions returned null)")}");
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogError($"[MediaPipePoseDetector] CreateFromOptions FAILED: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+            yield break;
         }
 
         if (autoCalibrate) StartCalibration();
@@ -669,5 +700,9 @@ public class MediaPipePoseDetector : MonoBehaviour
         Debug.LogWarning("[MediaPipePoseDetector] Inactive. Install the MediaPipe Unity Plugin, " +
                          "then add the scripting define symbol KINEX_MEDIAPIPE to enable pose tracking.");
     }
+
+    // No-op when MediaPipe is disabled (e.g. Android build without KINEX_MEDIAPIPE). Keeps callers
+    // such as CalibrationPanel compiling; the calibration properties stay at their Idle defaults.
+    public void StartCalibration() { }
 #endif
 }

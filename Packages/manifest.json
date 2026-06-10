@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "com.coplaydev.unity-mcp": "https://github.com/CoplayDev/unity-mcp.git?path=/MCPForUnity#main",
+    "com.learntoflutter.flutter_embed_unity_6000_0": "https://github.com/learntoflutter/flutter_embed_unity.git?path=example_unity_6000_0_project/Assets/FlutterEmbed",
     "com.github.homuler.mediapipe": "file:../LocalPackages/com.github.homuler.mediapipe-0.16.3.tgz",
     "com.unity.ai.inference": "2.5.0",
     "com.unity.cloud.gltfast": "6.19.0",
