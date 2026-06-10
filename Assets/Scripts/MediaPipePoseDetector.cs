@@ -109,6 +109,11 @@ public class MediaPipePoseDetector : MonoBehaviour
     [Header("Preview")]
     [Tooltip("Mirror the camera preview like a selfie (matches the reference app).")]
     [SerializeField] bool mirrorPreview = true;
+    [Tooltip("PREVIEW-ONLY clockwise rotation (degrees, multiple of 90). The Android front camera " +
+             "delivers frames rotated, so the on-screen preview looks sideways. This rotates the preview " +
+             "DISPLAY only — NOT the frame fed to MediaPipe (tracking is already correct). Applied on " +
+             "Android only; ignored in the editor/desktop. Try 90 or 270 if the direction is wrong.")]
+    [SerializeField] int previewRotationCW = 90;
     public Vector2 PreviewCropOffset { get; private set; } = Vector2.zero; // x,y in 0..1
     public Vector2 PreviewCropScale { get; private set; } = Vector2.one;   // w,h in 0..1
     public bool PreviewMirrored => mirrorPreview;
@@ -365,8 +370,28 @@ public class MediaPipePoseDetector : MonoBehaviour
     {
         if (SrcWidth <= 16 || _rawImage == null) return;
 
+        var rt = _rawImage.rectTransform;
+
+        // Preview-only rotation (Android front cam delivers rotated frames). A quarter turn swaps the
+        // box's axes, so re-anchor the RawImage to a centred, size-swapped rect BEFORE rotating, so the
+        // rotated image fills the box instead of overflowing it. Editor/desktop: rotCW stays 0.
+        int rotCW = 0;
+#if UNITY_ANDROID && !UNITY_EDITOR
+        rotCW = previewRotationCW;
+#endif
+        bool quarter = (Mathf.Abs(rotCW) % 180) == 90;
+        if (quarter)
+        {
+            Vector2 box = rt.rect.size;                       // current on-screen box size
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = new Vector2(box.y, box.x);         // swap W/H so a 90° turn fills the box
+            rt.anchoredPosition = Vector2.zero;
+        }
+        rt.localEulerAngles = new Vector3(0f, 0f, -rotCW);    // negative Z = clockwise
+
         float camAspect = (float)SrcWidth / SrcHeight;
-        UnityEngine.Rect r = _rawImage.rectTransform.rect;
+        UnityEngine.Rect r = rt.rect;                         // post-swap rect
         float rectAspect = r.height > 0f ? r.width / r.height : camAspect;
 
         float ox = 0f, oy = 0f, sw = 1f, sh = 1f;
@@ -383,9 +408,11 @@ public class MediaPipePoseDetector : MonoBehaviour
 
         if (mirrorPreview && !UsingVideo) // don't mirror a recorded clip — it's not a selfie
         {
-            var s = _rawImage.rectTransform.localScale;
-            s.x = -Mathf.Abs(s.x);
-            _rawImage.rectTransform.localScale = s;
+            var s = rt.localScale;
+            // After a quarter turn the screen-horizontal axis is the rect's local Y, so mirror that.
+            if (quarter) s.y = -Mathf.Abs(s.y);
+            else         s.x = -Mathf.Abs(s.x);
+            rt.localScale = s;
         }
         _previewReady = true;
     }
