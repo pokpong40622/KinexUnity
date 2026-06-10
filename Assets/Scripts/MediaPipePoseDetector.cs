@@ -109,6 +109,11 @@ public class MediaPipePoseDetector : MonoBehaviour
     [Header("Preview")]
     [Tooltip("Mirror the camera preview like a selfie (matches the reference app).")]
     [SerializeField] bool mirrorPreview = true;
+    [Tooltip("PREVIEW-ONLY clockwise rotation (degrees, multiple of 90). The Android front camera " +
+             "delivers frames rotated, so the on-screen preview looks sideways. This rotates the preview " +
+             "DISPLAY only — NOT the frame fed to MediaPipe (tracking is already correct). Applied on " +
+             "Android only; ignored in the editor/desktop. Try 90 or 270 if the direction is wrong.")]
+    [SerializeField] int previewRotationCW = 90;
     public Vector2 PreviewCropOffset { get; private set; } = Vector2.zero; // x,y in 0..1
     public Vector2 PreviewCropScale { get; private set; } = Vector2.one;   // w,h in 0..1
     public bool PreviewMirrored => mirrorPreview;
@@ -182,35 +187,6 @@ public class MediaPipePoseDetector : MonoBehaviour
         LatestKeypoints = new Vector2[17];
         LatestConfidence = new float[17];
 
-        string modelPath = System.IO.Path.Combine(Application.streamingAssetsPath, modelFileName);
-        bool modelExists = System.IO.File.Exists(modelPath);
-        Debug.Log($"[MediaPipePoseDetector] Model path: '{modelPath}' | exists={modelExists}");
-        if (!modelExists)
-        {
-            Debug.LogError($"[MediaPipePoseDetector] Model file NOT FOUND at '{modelPath}'. " +
-                           "Copy pose_landmarker_full.bytes into Assets/StreamingAssets/ and try again.");
-            return;
-        }
-
-        try
-        {
-            var baseOptions = new BaseOptions(modelAssetPath: modelPath);
-            var options = new PoseLandmarkerOptions(
-                baseOptions,
-                runningMode: RunningMode.VIDEO,
-                numPoses: 1,
-                minPoseDetectionConfidence: minDetectionConfidence,
-                minPosePresenceConfidence: minDetectionConfidence,
-                minTrackingConfidence: minDetectionConfidence,
-                outputSegmentationMasks: false);
-            _landmarker = PoseLandmarker.CreateFromOptions(options);
-            Debug.Log($"[MediaPipePoseDetector] Landmarker created: {(_landmarker != null ? "OK" : "null (CreateFromOptions returned null)")}");
-        }
-        catch (System.Exception ex)
-        {
-            Debug.LogError($"[MediaPipePoseDetector] CreateFromOptions FAILED: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
-        }
-
         _rawImage = FindAnyObjectByType<UnityEngine.UI.RawImage>();
 
         if (testVideoClip != null)
@@ -242,6 +218,66 @@ public class MediaPipePoseDetector : MonoBehaviour
                 : new WebCamTexture(640, 480, 30);
             _webcam.Play();
             if (_rawImage != null) _rawImage.texture = _webcam;
+        }
+
+        // Model load is async-capable so it works on Android, where StreamingAssets live inside the
+        // APK and can't be read with System.IO. See InitLandmarker.
+        StartCoroutine(InitLandmarker());
+    }
+
+    // Loads the pose model and creates the landmarker. On Android, Application.streamingAssetsPath
+    // is a "jar:file://...apk!/assets" URL that System.IO can't open, so the bytes must come through
+    // UnityWebRequest; desktop/editor read the file directly. Either way we hand MediaPipe the raw
+    // bytes via modelAssetBuffer, which is platform-independent.
+    System.Collections.IEnumerator InitLandmarker()
+    {
+        string modelPath = System.IO.Path.Combine(Application.streamingAssetsPath, modelFileName);
+        byte[] modelBytes = null;
+
+        if (modelPath.Contains("://"))
+        {
+            // Inside the APK (Android) — read via UnityWebRequest.
+            using (var req = UnityEngine.Networking.UnityWebRequest.Get(modelPath))
+            {
+                yield return req.SendWebRequest();
+                if (req.result != UnityEngine.Networking.UnityWebRequest.Result.Success)
+                {
+                    Debug.LogError($"[MediaPipePoseDetector] Model load FAILED from '{modelPath}': {req.error}");
+                    yield break;
+                }
+                modelBytes = req.downloadHandler.data;
+            }
+        }
+        else
+        {
+            if (!System.IO.File.Exists(modelPath))
+            {
+                Debug.LogError($"[MediaPipePoseDetector] Model file NOT FOUND at '{modelPath}'. " +
+                               "Copy pose_landmarker_full.bytes into Assets/StreamingAssets/ and try again.");
+                yield break;
+            }
+            modelBytes = System.IO.File.ReadAllBytes(modelPath);
+        }
+        Debug.Log($"[MediaPipePoseDetector] Model bytes loaded: {(modelBytes != null ? modelBytes.Length.ToString() : "null")} from '{modelPath}'");
+
+        try
+        {
+            var baseOptions = new BaseOptions(modelAssetBuffer: modelBytes);
+            var options = new PoseLandmarkerOptions(
+                baseOptions,
+                runningMode: RunningMode.VIDEO,
+                numPoses: 1,
+                minPoseDetectionConfidence: minDetectionConfidence,
+                minPosePresenceConfidence: minDetectionConfidence,
+                minTrackingConfidence: minDetectionConfidence,
+                outputSegmentationMasks: false);
+            _landmarker = PoseLandmarker.CreateFromOptions(options);
+            Debug.Log($"[MediaPipePoseDetector] Landmarker created: {(_landmarker != null ? "OK" : "null (CreateFromOptions returned null)")}");
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogError($"[MediaPipePoseDetector] CreateFromOptions FAILED: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+            yield break;
         }
 
         if (autoCalibrate) StartCalibration();
@@ -334,8 +370,28 @@ public class MediaPipePoseDetector : MonoBehaviour
     {
         if (SrcWidth <= 16 || _rawImage == null) return;
 
+        var rt = _rawImage.rectTransform;
+
+        // Preview-only rotation (Android front cam delivers rotated frames). A quarter turn swaps the
+        // box's axes, so re-anchor the RawImage to a centred, size-swapped rect BEFORE rotating, so the
+        // rotated image fills the box instead of overflowing it. Editor/desktop: rotCW stays 0.
+        int rotCW = 0;
+#if UNITY_ANDROID && !UNITY_EDITOR
+        rotCW = previewRotationCW;
+#endif
+        bool quarter = (Mathf.Abs(rotCW) % 180) == 90;
+        if (quarter)
+        {
+            Vector2 box = rt.rect.size;                       // current on-screen box size
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = new Vector2(box.y, box.x);         // swap W/H so a 90° turn fills the box
+            rt.anchoredPosition = Vector2.zero;
+        }
+        rt.localEulerAngles = new Vector3(0f, 0f, -rotCW);    // negative Z = clockwise
+
         float camAspect = (float)SrcWidth / SrcHeight;
-        UnityEngine.Rect r = _rawImage.rectTransform.rect;
+        UnityEngine.Rect r = rt.rect;                         // post-swap rect
         float rectAspect = r.height > 0f ? r.width / r.height : camAspect;
 
         float ox = 0f, oy = 0f, sw = 1f, sh = 1f;
@@ -352,9 +408,11 @@ public class MediaPipePoseDetector : MonoBehaviour
 
         if (mirrorPreview && !UsingVideo) // don't mirror a recorded clip — it's not a selfie
         {
-            var s = _rawImage.rectTransform.localScale;
-            s.x = -Mathf.Abs(s.x);
-            _rawImage.rectTransform.localScale = s;
+            var s = rt.localScale;
+            // After a quarter turn the screen-horizontal axis is the rect's local Y, so mirror that.
+            if (quarter) s.y = -Mathf.Abs(s.y);
+            else         s.x = -Mathf.Abs(s.x);
+            rt.localScale = s;
         }
         _previewReady = true;
     }
@@ -669,5 +727,9 @@ public class MediaPipePoseDetector : MonoBehaviour
         Debug.LogWarning("[MediaPipePoseDetector] Inactive. Install the MediaPipe Unity Plugin, " +
                          "then add the scripting define symbol KINEX_MEDIAPIPE to enable pose tracking.");
     }
+
+    // No-op when MediaPipe is disabled (e.g. Android build without KINEX_MEDIAPIPE). Keeps callers
+    // such as CalibrationPanel compiling; the calibration properties stay at their Idle defaults.
+    public void StartCalibration() { }
 #endif
 }
