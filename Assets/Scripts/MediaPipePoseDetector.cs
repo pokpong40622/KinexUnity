@@ -39,6 +39,10 @@ public class MediaPipePoseDetector : MonoBehaviour
     [SerializeField][Range(0f, 1f)] float minDetectionConfidence = 0.5f;
     [Tooltip("LERP factor toward each new frame. React used 0.28 (smaller = smoother/laggier).")]
     [SerializeField][Range(0.05f, 0.8f)] float smoothingFactor = 0.28f;
+    [Tooltip("Extra-strong smoothing for the knee/ankle landmarks (the noisiest). Lower = steadier " +
+             "resting legs but slightly more lag on leg moves. This is what stops the still leg " +
+             "jittering when the other leg lifts.")]
+    [SerializeField][Range(0.05f, 0.5f)] float legSmoothing = 0.13f;
     [Tooltip("Drive the avatar from keypoints. Off = only supply keypoints for scoring.")]
     [SerializeField] bool drivesAvatar = true;
     [Tooltip("A bone only drives while BOTH its endpoints are at least this visible. " +
@@ -46,10 +50,14 @@ public class MediaPipePoseDetector : MonoBehaviour
              "so you can sit / be half out of frame and the upper body still tracks " +
              "without the legs flailing. Lower = tracks more but flails more.")]
     [SerializeField][Range(0f, 1f)] float minBoneVisibility = 0.5f;
-    [Tooltip("Separate (lower) visibility threshold for leg landmarks. " +
-             "Skeleton overlay draws at 0.4 — keep this at or below that so legs " +
-             "drive whenever the skeleton preview shows them.")]
-    [SerializeField][Range(0f, 1f)] float legVisThreshold = 0.15f;
+    [Tooltip("Single visibility threshold for leg landmarks — used for BOTH the gate and the " +
+             "actual drive (no mid-range freeze). Skeleton overlay draws at 0.4; keep this near " +
+             "or below that so legs drive whenever the preview shows them. Lower = legs move more.")]
+    [SerializeField][Range(0f, 1f)] float legVisThreshold = 0.3f;
+    [Tooltip("Max degrees per second a LEG bone may rotate toward its target. Caps sudden " +
+             "MediaPipe jumps so legs can't fly or snap-twist on a noisy frame. " +
+             "Lower = steadier but laggier. This is the legs' main stabilizer.")]
+    [SerializeField][Range(60f, 1080f)] float legMaxDegPerSec = 540f;
 
     [Header("Test Source (leave EMPTY for normal webcam)")]
     [Tooltip("TEST ONLY: assign a video clip to feed it to pose detection instead of the live " +
@@ -79,6 +87,11 @@ public class MediaPipePoseDetector : MonoBehaviour
     [SerializeField] bool autoCalibrate = true;
     [Tooltip("Seconds to average MediaPipe samples while the user holds the T-pose.")]
     [SerializeField][Range(2f, 10f)] float calibrationDuration = 5f;
+    [Tooltip("How strongly calibration overrides the avatar's built-in T-pose directions. " +
+             "0 = ignore calibration (use the normal/default logic), 1 = fully use the captured " +
+             "T-pose. Lower keeps the rest pose closer to default so an imperfect T-pose can't " +
+             "skew your arms/legs to a stuck angle.")]
+    [SerializeField][Range(0f, 1f)] float calibrationStrength = 0.5f;
 
     public enum CalibState { Idle, Prompting, Counting, Done }
     public CalibState CalibrationPhase { get; private set; } = CalibState.Idle;
@@ -149,6 +162,9 @@ public class MediaPipePoseDetector : MonoBehaviour
     // T-pose cache (same proven technique as PoseDetector.cs, now in 3D).
     readonly Quaternion[] _tPoseRot = new Quaternion[55];
     readonly Dictionary<HumanBodyBones, Vector3> _tPoseDir = new();
+    // Pristine geometric directions (avatar bind T-pose). Kept so calibration can BLEND toward the
+    // user's captured T-pose instead of fully replacing it — an imperfect T-pose can't then skew rest.
+    readonly Dictionary<HumanBodyBones, Vector3> _geomDir = new();
 
     // Smoothed 3D world positions per MediaPipe landmark (the LERP from ThreeCanvas.tsx).
     readonly Vector3[] _smoothed = new Vector3[33];
@@ -287,7 +303,13 @@ public class MediaPipePoseDetector : MonoBehaviour
         {
             var p = ToUnity(world[i]);
             if (!_hasSmoothed[i]) { _smoothed[i] = p; _hasSmoothed[i] = true; }
-            else _smoothed[i] = Vector3.Lerp(_smoothed[i], p, smoothingFactor);
+            else
+            {
+                // Knees/ankles (25..28) are the noisiest landmarks — smooth them harder so the
+                // resting leg doesn't jitter when the other leg moves.
+                float f = (i >= MP_L_KNEE && i <= MP_R_ANKLE) ? legSmoothing : smoothingFactor;
+                _smoothed[i] = Vector3.Lerp(_smoothed[i], p, f);
+            }
         }
 
         // Capture this frame's visibility so ApplyToBones can freeze off-camera bones.
@@ -375,27 +397,13 @@ public class MediaPipePoseDetector : MonoBehaviour
         Drive(HumanBodyBones.LeftLowerArm, MP_R_ELBOW, MP_R_WRIST);
         Drive(HumanBodyBones.RightUpperArm, MP_L_SHOULDER, MP_L_ELBOW);
         Drive(HumanBodyBones.RightLowerArm, MP_L_ELBOW, MP_L_WRIST);
-        // Check each leg independently — one leg moving doesn't block the other.
-        if (LegVisible(MP_R_HIP, MP_R_KNEE, MP_R_ANKLE))
-        {
-            Drive(HumanBodyBones.LeftUpperLeg, MP_R_HIP, MP_R_KNEE);
-            Drive(HumanBodyBones.LeftLowerLeg, MP_R_KNEE, MP_R_ANKLE);
-        }
-        else
-        {
-            ResetBone(HumanBodyBones.LeftUpperLeg);
-            ResetBone(HumanBodyBones.LeftLowerLeg);
-        }
-        if (LegVisible(MP_L_HIP, MP_L_KNEE, MP_L_ANKLE))
-        {
-            Drive(HumanBodyBones.RightUpperLeg, MP_L_HIP, MP_L_KNEE);
-            Drive(HumanBodyBones.RightLowerLeg, MP_L_KNEE, MP_L_ANKLE);
-        }
-        else
-        {
-            ResetBone(HumanBodyBones.RightUpperLeg);
-            ResetBone(HumanBodyBones.RightLowerLeg);
-        }
+        // Drive each leg SEGMENT independently so the thigh keeps tracking when the ankle is out
+        // of frame — only the shin rests. A segment rests when either of its two landmarks isn't
+        // visible; both segments rest (whole leg) when no lower-body joints are seen.
+        DriveOrRestLeg(HumanBodyBones.LeftUpperLeg,  MP_R_HIP,  MP_R_KNEE);
+        DriveOrRestLeg(HumanBodyBones.LeftLowerLeg,  MP_R_KNEE, MP_R_ANKLE);
+        DriveOrRestLeg(HumanBodyBones.RightUpperLeg, MP_L_HIP,  MP_L_KNEE);
+        DriveOrRestLeg(HumanBodyBones.RightLowerLeg, MP_L_KNEE, MP_L_ANKLE);
     }
 
     // A landmark is usable only if it has been seen AND is currently visible enough.
@@ -436,18 +444,28 @@ public class MediaPipePoseDetector : MonoBehaviour
         DriveSegment(HumanBodyBones.Spine, from, from + delta);
     }
 
-    bool LegVisible(int hip, int knee, int ankle)
+    // A leg landmark is usable when it has been seen AND clears legVisThreshold. This is the
+    // ONE threshold legs use — gate and drive agree, so a visible leg never freezes mid-range.
+    bool LegUsable(int i) => _hasSmoothed[i] && _visibility[i] >= legVisThreshold;
+
+    // Drive a leg segment if BOTH its landmarks are visible (same threshold as the gate,
+    // rate-limited so jitter can't fly/snap-twist); otherwise ease it back to rest. Applied
+    // per segment, so the thigh (hip→knee) keeps tracking even when the ankle is off-camera.
+    void DriveOrRestLeg(HumanBodyBones bone, int from, int to)
     {
-        // Uses legVisThreshold (not minBoneVisibility) so legs drive whenever the skeleton
-        // overlay draws them — the overlay uses 0.4 and legVisThreshold defaults to 0.35.
-        bool LV(int i) => _hasSmoothed[i] && _visibility[i] >= legVisThreshold;
-        return LV(hip) && LV(knee) && LV(ankle);
+        if (LegUsable(from) && LegUsable(to))
+            DriveSegmentClamped(bone, _smoothed[from], _smoothed[to], legMaxDegPerSec * Time.deltaTime);
+        else
+            ResetBone(bone);
     }
 
+    // Ease the leg back to its rest pose instead of snapping when it leaves the frame.
     void ResetBone(HumanBodyBones bone)
     {
         Transform t = _animator.GetBoneTransform(bone);
-        if (t != null) t.rotation = _tPoseRot[(int)bone];
+        if (t != null)
+            t.rotation = Quaternion.RotateTowards(t.rotation, _tPoseRot[(int)bone],
+                                                  legMaxDegPerSec * Time.deltaTime);
     }
 
     void DriveNeckWithTilt()
@@ -473,6 +491,21 @@ public class MediaPipePoseDetector : MonoBehaviour
         if (target.sqrMagnitude < 0.01f) return;
 
         t.rotation = Quaternion.FromToRotation(_tPoseDir[bone], target) * _tPoseRot[(int)bone];
+    }
+
+    // Same as DriveSegment but eases toward the target by at most maxDeg this frame, so a
+    // sudden MediaPipe jump can't snap the bone (used for legs, the noisiest landmarks).
+    void DriveSegmentClamped(HumanBodyBones bone, Vector3 from, Vector3 to, float maxDeg)
+    {
+        if (!_tPoseDir.ContainsKey(bone)) return;
+        Transform t = _animator.GetBoneTransform(bone);
+        if (t == null) return;
+
+        Vector3 target = (to - from).normalized;
+        if (target.sqrMagnitude < 0.01f) return;
+
+        Quaternion goal = Quaternion.FromToRotation(_tPoseDir[bone], target) * _tPoseRot[(int)bone];
+        t.rotation = Quaternion.RotateTowards(t.rotation, goal, maxDeg);
     }
 
     // ---- T-pose caching (identical approach to PoseDetector.cs:194). ----
@@ -502,7 +535,7 @@ public class MediaPipePoseDetector : MonoBehaviour
     {
         Transform t = _animator.GetBoneTransform(bone);
         Transform c = _animator.GetBoneTransform(child);
-        if (t != null && c != null) _tPoseDir[bone] = (c.position - t.position).normalized;
+        if (t != null && c != null) { _tPoseDir[bone] = (c.position - t.position).normalized; _geomDir[bone] = _tPoseDir[bone]; }
     }
 
     void CacheDirFallback(HumanBodyBones bone, HumanBodyBones primary, HumanBodyBones fallback)
@@ -510,8 +543,15 @@ public class MediaPipePoseDetector : MonoBehaviour
         Transform t = _animator.GetBoneTransform(bone);
         if (t == null) return;
         Transform c = _animator.GetBoneTransform(primary) ?? _animator.GetBoneTransform(fallback);
-        if (c != null) _tPoseDir[bone] = (c.position - t.position).normalized;
+        if (c != null) { _tPoseDir[bone] = (c.position - t.position).normalized; _geomDir[bone] = _tPoseDir[bone]; }
     }
+
+    // Blend the calibrated direction toward the avatar's pristine geometric direction by
+    // calibrationStrength (0 = ignore calibration entirely, 1 = use it fully).
+    Vector3 BlendDir(HumanBodyBones bone, Vector3 calibrated) =>
+        _geomDir.ContainsKey(bone)
+            ? Vector3.Slerp(_geomDir[bone], calibrated, calibrationStrength).normalized
+            : calibrated;
 
     // Flip a Texture2D vertically (row swap). Only used for the video test source, where
     // ReadPixels delivers the frame bottom-up vs the top-down frames the webcam supplies.
@@ -585,12 +625,12 @@ public class MediaPipePoseDetector : MonoBehaviour
         void SetDir(HumanBodyBones bone, int from, int to)
         {
             Vector3 d = (avg[to] - avg[from]).normalized;
-            if (d.sqrMagnitude > 0.01f) _tPoseDir[bone] = d;
+            if (d.sqrMagnitude > 0.01f) _tPoseDir[bone] = BlendDir(bone, d);
         }
         void SetMidMidDir(HumanBodyBones bone, int fA, int fB, int tA, int tB)
         {
             Vector3 d = (((avg[tA] + avg[tB]) * 0.5f) - ((avg[fA] + avg[fB]) * 0.5f)).normalized;
-            if (d.sqrMagnitude > 0.01f) _tPoseDir[bone] = d;
+            if (d.sqrMagnitude > 0.01f) _tPoseDir[bone] = BlendDir(bone, d);
         }
 
         // Torso — hip→shoulder direction.
@@ -613,7 +653,7 @@ public class MediaPipePoseDetector : MonoBehaviour
         Vector3 shoulderMid = (avg[MP_L_SHOULDER] + avg[MP_R_SHOULDER]) * 0.5f;
         Vector3 earMid      = (avg[MP_L_EAR]      + avg[MP_R_EAR])      * 0.5f;
         Vector3 neckDir     = (earMid - shoulderMid).normalized;
-        if (neckDir.sqrMagnitude > 0.01f) _tPoseDir[HumanBodyBones.Neck] = neckDir;
+        if (neckDir.sqrMagnitude > 0.01f) _tPoseDir[HumanBodyBones.Neck] = BlendDir(HumanBodyBones.Neck, neckDir);
     }
 
     void OnDestroy()
