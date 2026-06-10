@@ -77,3 +77,6 @@ ui_audits/
 
 # slnx (Unity auto-generated)
 *.slnx
+
+# Test screenshots (Claude/MCP captures)
+/Assets/Screenshots/

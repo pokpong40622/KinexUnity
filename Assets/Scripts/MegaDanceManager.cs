@@ -8,48 +8,57 @@ using Kinex.Trainer;
 namespace Kinex.MegaDance
 {
     /// <summary>
-    /// MEGA DANCE core loop (mirror & hold): trainer demos a pose, player copies it,
-    /// holding a good-enough match for holdSeconds clears it → "Correct!" → next pose →
-    /// results after the last one.
+    /// MEGA DANCE core loop. The trainer demos a target pose; the player copies it.
     ///
-    /// State: Idle → Scoring → Correct → (next Scoring | Results).
-    /// Scoring source is swappable: keyboard stub now (SPACE = perfect match, runs with
-    /// no camera), or live PoseDetector keypoints later by flipping useKeyboardStub.
+    /// Flow:  Idle(Start) → FirstPose(shows target image + 3-2-1 countdown) →
+    ///        Playing(live camera, 0–100% closeness) → match ≥ passThreshold locks instantly →
+    ///        Correct! → FirstPose(next pose) → … → Results after the last pose.
+    ///
+    /// Only "Correct" feedback ever — there is no "wrong" state. Scoring source is swappable:
+    /// keyboard stub now (SPACE = 100%, runs with no camera), or live PoseDetector keypoints
+    /// by flipping useKeyboardStub.
     /// </summary>
     public class MegaDanceManager : MonoBehaviour
     {
-        enum State { Idle, Scoring, Correct, Results }
+        enum State { Idle, FirstPose, Playing, Correct, Results }
 
         [Header("Trainer")]
         public TrainerPoseController trainer;
 
         [Header("Scoring source")]
-        [Tooltip("Hold SPACE = perfect match. Bypasses real pose scoring until the webcam is wired.")]
+        [Tooltip("Hold SPACE = 100% match. Bypasses real pose scoring until the webcam is wired.")]
         public bool useKeyboardStub = true;
         [Tooltip("Live keypoint source. Only used when useKeyboardStub is false.")]
         public MediaPipePoseDetector poseDetector;
-        [Range(0f, 1f)] public float passThreshold = 0.6f;
-        [Tooltip("Seconds the match must stay above passThreshold to clear a pose.")]
-        public float holdSeconds = 2f;
+        [Tooltip("Closeness needed to clear a pose. 0.95 = within ±5% of the target.")]
+        [Range(0f, 1f)] public float passThreshold = 0.95f;
         [Tooltip("Per-limb angle tolerance (degrees). Bigger = more forgiving.")]
         public float toleranceDegrees = 45f;
         [Range(0f, 1f)] public float minConfidence = 0.3f;
 
+        [Header("Timing")]
+        [Tooltip("Get-ready countdown shown on the FirstPose screen before scoring starts.")]
+        public int firstPoseCountdown = 3;
+        [Tooltip("Seconds the big 'Correct!' overlay stays up before the next pose.")]
+        public float correctHoldSeconds = 1.2f;
+
         [Header("UI — panels")]
         public GameObject startPanel;
-        public GameObject poseInstructionPanel;
-        public GameObject hudPanel;
-        public GameObject correctOverlay;
+        public GameObject poseInstructionPanel; // FirstPose screen
+        public GameObject hudPanel;             // Playing screen
+        public GameObject correctOverlay;       // Correct! screen
         public GameObject resultsPanel;
 
-        [Header("UI — texts & bar")]
-        public TMP_Text poseNameText;        // instruction card, e.g. "Pose 3"
+        [Header("UI — texts, image & bar")]
+        public TMP_Text poseNameText;        // FirstPose card, e.g. "Pose 3"
+        public Image poseImage;              // FirstPose card, target-pose preview sprite
+        public TMP_Text countdownText;       // FirstPose 3-2-1 countdown
         public TMP_Text poseCounterText;     // HUD "3/10"
+        public TMP_Text percentText;         // HUD bottom strip, "0%".."100%" closeness
+        public Image matchBarFill;           // HUD bar, fillAmount 0..1 = live score
         public TMP_Text correctPoseNameText; // small name under big "Correct!"
-        public Image matchBarFill;           // fillAmount 0..1 = live score
 
         State _state = State.Idle;
-        float _holdTimer;
         float[][] _signatures;               // [pose][8] baked angle targets
         readonly PoseSignatureBaker _baker = new PoseSignatureBaker();
 
@@ -65,7 +74,7 @@ namespace Kinex.MegaDance
             if (trainer == null) { Debug.LogError("[MegaDanceManager] trainer not assigned."); return; }
             trainer.autoAdvance = false; // the manager controls progression, not the trainer
             BakeSignatures();
-            GoToPose(0);
+            GoToFirstPose(0);
         }
 
         // Bake all target signatures once by snapping the rig through every pose and
@@ -82,28 +91,54 @@ namespace Kinex.MegaDance
             trainer.ApplyPoseImmediate(0); // leave the rig on pose 0
         }
 
-        void GoToPose(int index)
+        // ---- FirstPose: show the target pose image, run the get-ready countdown. ----
+        void GoToFirstPose(int index)
         {
             trainer.ShowPose(index);
             if (poseNameText != null)    poseNameText.text = $"Pose {index + 1}";
             if (poseCounterText != null) poseCounterText.text = $"{index + 1}/{trainer.PoseCount}";
-            SetPanels(instruction: true, hud: true, correct: false, results: false, start: false);
-            _holdTimer = 0f;
-            _state = State.Scoring;
+            if (poseImage != null)
+            {
+                var sprite = Resources.Load<Sprite>($"PosePreviews/pose_{index + 1:00}");
+                if (sprite != null) poseImage.sprite = sprite;
+            }
+            SetPanels(instruction: true, hud: false, correct: false, results: false, start: false);
+            StartCoroutine(FirstPoseRoutine());
+        }
+
+        IEnumerator FirstPoseRoutine()
+        {
+            _state = State.FirstPose;
+            for (int t = firstPoseCountdown; t > 0; t--)
+            {
+                if (countdownText != null) countdownText.text = t.ToString();
+                yield return new WaitForSeconds(1f);
+            }
+            if (countdownText != null) countdownText.text = "";
+            EnterPlaying();
+        }
+
+        // ---- Playing: live scoring; first frame at/above passThreshold locks the pose. ----
+        void EnterPlaying()
+        {
+            SetPanels(instruction: false, hud: true, correct: false, results: false, start: false);
+            if (matchBarFill != null) matchBarFill.fillAmount = 0f;
+            if (percentText != null)  percentText.text = "0%";
+            _state = State.Playing;
         }
 
         void Update()
         {
-            if (_state != State.Scoring) return;
+            if (_state != State.Playing) return;
 
             float score = ReadScore();
             if (matchBarFill != null) matchBarFill.fillAmount = score;
+            if (percentText != null)  percentText.text = $"{Mathf.RoundToInt(score * 100f)}%";
 
-            _holdTimer = score >= passThreshold ? _holdTimer + Time.deltaTime : 0f;
-            if (_holdTimer >= holdSeconds) StartCoroutine(CorrectSequence());
+            if (score >= passThreshold) StartCoroutine(CorrectSequence());
         }
 
-        // 0..1 match for the current pose. Stub: SPACE held = perfect. Real: keypoints vs signature.
+        // 0..1 match for the current pose. Stub: SPACE held = 100%. Real: keypoints vs signature.
         float ReadScore()
         {
             if (useKeyboardStub)
@@ -117,15 +152,16 @@ namespace Kinex.MegaDance
 
         IEnumerator CorrectSequence()
         {
-            _state = State.Correct;
+            _state = State.Correct; // set synchronously so Update() can't re-trigger this frame
             SetPanels(instruction: false, hud: false, correct: true, results: false, start: false);
             if (correctPoseNameText != null) correctPoseNameText.text = $"Pose {trainer.CurrentPose + 1}";
             if (matchBarFill != null) matchBarFill.fillAmount = 1f;
-            yield return new WaitForSeconds(1.2f);
+            if (percentText != null)  percentText.text = "100%";
+            yield return new WaitForSeconds(correctHoldSeconds);
 
             int next = trainer.CurrentPose + 1;
             if (next >= trainer.PoseCount) ShowResults();
-            else GoToPose(next);
+            else GoToFirstPose(next);
         }
 
         void ShowResults()
