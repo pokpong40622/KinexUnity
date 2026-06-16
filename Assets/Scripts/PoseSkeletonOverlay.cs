@@ -55,6 +55,24 @@ public class PoseSkeletonOverlay : Graphic
         Vector2 scl = source.PreviewCropScale;
         Rect r = rectTransform.rect;
 
+        // On Android the camera preview RawImage is rotated 90° CW (previewRotationCW=270 means
+        // the transform's local Z is set to -270 = +90°, which is equivalent to 90° CW).
+        // The skeleton keypoints are in the UNROTATED frame space, so we rotate them 90° CW
+        // to match the visual. The rotation is applied around the rect centre after mapping.
+        //
+        // 90° CW transform around centre (cx, cy):
+        //   x' = cx + (y - cy)
+        //   y' = cy - (x - cx)
+        //
+        // NEEDS ON-DEVICE CONFIRMATION — the exact direction (CW vs CCW) depends on which
+        // way the preview RawImage local Z ends up. If the skeleton is off by 180° or in the
+        // wrong direction, change the sign of the rotation below.
+#if UNITY_ANDROID && !UNITY_EDITOR
+        bool rotateForAndroid = true;
+#else
+        bool rotateForAndroid = false;
+#endif
+
         Vector2 Map(int i)
         {
             Vector2 p = kp[i];
@@ -64,7 +82,20 @@ public class PoseSkeletonOverlay : Graphic
             // MediaPipe poseLandmarks inherit that: y=0 = feet, y=1 = head.
             // UI also grows upward, so v maps directly: y=0 → bottom of rect, y=1 → top.
             // Horizontal mirror is handled by the preview RawImage's negative localScale.
-            return new Vector2(r.xMin + u * r.width, r.yMin + v * r.height);
+            Vector2 mapped = new Vector2(r.xMin + u * r.width, r.yMin + v * r.height);
+
+            if (rotateForAndroid)
+            {
+                // Rotate 90° CW around the centre of the rect.
+                float cx = r.xMin + r.width  * 0.5f;
+                float cy = r.yMin + r.height * 0.5f;
+                float dx = mapped.x - cx;
+                float dy = mapped.y - cy;
+                // 90° CW: (dx, dy) → (dy, -dx)
+                mapped = new Vector2(cx + dy, cy - dx);
+            }
+
+            return mapped;
         }
 
         bool Vis(int i) => conf == null || i >= conf.Length || conf[i] >= minVisibility;

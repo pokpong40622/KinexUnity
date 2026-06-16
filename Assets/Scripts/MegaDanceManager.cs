@@ -75,7 +75,9 @@ namespace Kinex.MegaDance
             _state = State.Idle;
         }
 
-        /// <summary>Hooked to the green Start button (and the results Retry button).</summary>
+        /// <summary>Hooked to the green Start button (and the results Retry button).
+        /// Begins gameplay immediately — no calibration gate. The avatar drives from its
+        /// geometric T-pose so calibration is not required for correct tracking.</summary>
         public void StartGame()
         {
             if (trainer == null) { Debug.LogError("[MegaDanceManager] trainer not assigned."); return; }
@@ -83,6 +85,25 @@ namespace Kinex.MegaDance
             if (debugNextButton != null) debugNextButton.SetActive(true); // visible once the game starts
             BakeSignatures();
             GoToFirstPose(0);
+        }
+
+        // Kept so external references (UI buttons, other scripts) that call CalibrateThenStart
+        // don't break at compile time. It delegates straight to StartGame so the behaviour is
+        // identical — no calibration countdown is run.
+        IEnumerator CalibrateThenStart()
+        {
+            StartGame();
+            yield break;
+        }
+
+        /// <summary>
+        /// Back button → return to the Flutter home screen. flutter_embed_unity routes this
+        /// to MegaDanceGameScreen.onMessageFromUnity, which does context.go('/home'). Same
+        /// {"type":"exit"} contract Kinex World uses. In the editor SendToFlutter just logs.
+        /// </summary>
+        public void ExitToHome()
+        {
+            SendToFlutter.Send("{\"type\":\"exit\"}");
         }
 
         // Bake all target signatures once by snapping the rig through every pose and
