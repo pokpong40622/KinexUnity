@@ -36,6 +36,12 @@ namespace Kinex.MegaDance
         [Tooltip("Per-limb angle tolerance (degrees). Bigger = more forgiving.")]
         public float toleranceDegrees = 45f;
         [Range(0f, 1f)] public float minConfidence = 0.3f;
+        [Tooltip("Score smoothing per frame (0 = frozen, 1 = no smoothing). Lower = steadier % and " +
+                 "fewer false passes from keypoint jitter, but slower to react.")]
+        [Range(0.05f, 1f)] public float scoreSmoothing = 0.25f;
+        [Tooltip("Seconds the smoothed score must stay at/above passThreshold before the pose clears. " +
+                 "Stops a single lucky/jittery frame from passing.")]
+        public float holdToPassSeconds = 0.4f;
         [Tooltip("Log per-limb player-vs-target angles to logcat (~2x/sec) while Playing, so we can " +
                  "see WHY a held pose scores low (mirror? Y-flip? just a non-matching target pose?).")]
         public bool scoreDebugLog = true;
@@ -75,6 +81,8 @@ namespace Kinex.MegaDance
         int _poseIndex;                      // current target pose; trainer animates to it on EnterPlaying
         float[][] _signatures;               // [pose][8] baked angle targets
         readonly PoseSignatureBaker _baker = new PoseSignatureBaker();
+        float _smoothedScore;                // EMA of ReadScore; what the HUD shows and the pass tests
+        float _aboveSince = -1f;             // Time.time the score first crossed passThreshold; -1 = below
 
         void Start()
         {
@@ -183,6 +191,8 @@ namespace Kinex.MegaDance
             SetPanels(instruction: false, hud: true, correct: false, results: false, start: false);
             if (matchBarFill != null) matchBarFill.fillAmount = 0f;
             if (percentText != null)  percentText.text = "0%";
+            _smoothedScore = 0f;
+            _aboveSince = -1f;
             _state = State.Playing;
         }
 
@@ -190,11 +200,20 @@ namespace Kinex.MegaDance
         {
             if (_state != State.Playing) return;
 
-            float score = ReadScore();
-            if (matchBarFill != null) matchBarFill.fillAmount = score;
-            if (percentText != null)  percentText.text = $"{Mathf.RoundToInt(score * 100f)}%";
+            // EMA so per-frame keypoint jitter doesn't flicker the % or trip a false pass.
+            float raw = ReadScore();
+            _smoothedScore = Mathf.Lerp(_smoothedScore, raw, scoreSmoothing);
 
-            if (score >= passThreshold) StartCoroutine(CorrectSequence());
+            if (matchBarFill != null) matchBarFill.fillAmount = _smoothedScore;
+            if (percentText != null)  percentText.text = $"{Mathf.RoundToInt(_smoothedScore * 100f)}%";
+
+            // Hold-to-pass: the smoothed score must stay at/above threshold continuously.
+            if (_smoothedScore >= passThreshold)
+            {
+                if (_aboveSince < 0f) _aboveSince = Time.time;
+                if (Time.time - _aboveSince >= holdToPassSeconds) StartCoroutine(CorrectSequence());
+            }
+            else _aboveSince = -1f;
         }
 
         // 0..1 match for the current pose. Stub: SPACE held = 100%. Real: keypoints vs signature.

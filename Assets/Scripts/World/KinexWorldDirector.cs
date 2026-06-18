@@ -80,6 +80,11 @@ namespace Kinex.World
         public GameObject resultsPanel;
         public TMP_Text resultsAverageText;
 
+        [Header("Audio")]
+        public AudioSource musicSource;
+        public AudioClip folkMusic;
+        [Range(0f, 1f)] public float musicVolume = 0.4f;
+
         /// <summary>Fired once when the class finishes (bridge → Flutter hooks this).</summary>
         public event Action<WorldSessionResult> OnSessionComplete;
 
@@ -118,6 +123,7 @@ namespace Kinex.World
             if (_run != null) { StopCoroutine(_run); _run = null; }
             Current = State.Idle;
             ShowOnly(null);
+            StopMusic();
             OnExitRequested?.Invoke();
         }
 
@@ -132,6 +138,7 @@ namespace Kinex.World
             // Intro card
             Current = State.Intro;
             ShowOnly(introPanel);
+            StartMusic();
             if (routineNameText) routineNameText.text = routine.englishName;
             if (autoBeginIntro) yield return new WaitForSeconds(introSeconds);
 
@@ -173,6 +180,7 @@ namespace Kinex.World
 
             Current = State.Results;
             ShowOnly(resultsPanel);
+            StopMusic();
             if (resultsAverageText) resultsAverageText.text = $"{LastResult.averagePercent:0.#}%";
             _run = null;
             OnSessionComplete?.Invoke(LastResult);
@@ -300,6 +308,22 @@ namespace Kinex.World
         }
 
         // ---------------------------------------------------------------- helpers
+
+        void StartMusic()
+        {
+            if (musicSource == null || folkMusic == null) return;
+            if (musicSource.isPlaying && musicSource.clip == folkMusic) return;
+            musicSource.clip = folkMusic;
+            musicSource.loop = true;
+            musicSource.volume = musicVolume;
+            musicSource.Play();
+        }
+
+        void StopMusic()
+        {
+            if (musicSource == null) return;
+            musicSource.Stop();
+        }
 
         void PlayClip(ExerciseDefinition ex)
         {
