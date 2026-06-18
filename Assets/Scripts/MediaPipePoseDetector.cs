@@ -70,7 +70,7 @@ public class MediaPipePoseDetector : MonoBehaviour
              "DIRECTLY onto it — these only correct MediaPipe's raw axis signs vs Unity. " +
              "flipX = left/right (arms on wrong side), flipZ = front/back (leans the wrong way), " +
              "flipY = up/down. Defaults match the validated webcam setup.")]
-    [SerializeField] bool flipX = false;
+    [SerializeField] bool flipX = false;  // cross-side arm/leg mapping already corrects laterality; flipX=true was double-mirroring
     [SerializeField] bool flipY = true;   // Android front cam: body needs Y-flip to appear upright
     [SerializeField] bool flipZ = false;
 
@@ -93,11 +93,21 @@ public class MediaPipePoseDetector : MonoBehaviour
     [Tooltip("How strongly the avatar follows you (motion range). 1 = full; lower = gentler, less " +
              "wild extremes. Adjustable in-game (Sensitivity).")]
     [SerializeField][Range(0.2f, 1f)] float followStrength = 1f;
+    [Tooltip("Leg follow strength as a FRACTION of followStrength. Legs are the noisiest landmarks, " +
+             "so keep this below 1 to make them calmer / less twitchy. 1 = legs follow as hard as arms.")]
+    [SerializeField][Range(0.1f, 1f)] float legSensitivity = 0.55f;
+    [Tooltip("Let the avatar's hips sway side-to-side with you — translates the root horizontally " +
+             "from your hip-center. Disabled in arms-only mode.")]
+    [SerializeField] bool hipSway = true;
+    [Tooltip("How far the hips translate horizontally (avatar local units). Higher = bigger sway. " +
+             "0.5 was imperceptible on device — bumped to 2.5; tune live if it's now too much/little.")]
+    [SerializeField] float hipSwayScale = 2.5f;
     [Tooltip("Degrees/second the whole body eases back to its rest pose when NOBODY is detected.")]
     [SerializeField] float restReturnDegPerSec = 300f;
     [Tooltip("Log periodic tracking values to the Android console (adb logcat) for debugging.")]
     [SerializeField] bool debugLog = true;
     float _lastDbg;
+    float _lastHipDbg;
 
     [Header("Calibration")]
     [Tooltip("Automatically start calibration when Play begins.")]
@@ -187,6 +197,10 @@ public class MediaPipePoseDetector : MonoBehaviour
     // Pristine geometric directions (avatar bind T-pose). Kept so calibration can BLEND toward the
     // user's captured T-pose instead of fully replacing it — an imperfect T-pose can't then skew rest.
     readonly Dictionary<HumanBodyBones, Vector3> _geomDir = new();
+
+    // Base hips local position captured at bind pose, so live hip-sway translates RELATIVE to it.
+    Vector3 _hipsBaseLocalPos;
+    bool _hipsBaseCached;
 
     // Smoothed 2D COCO-17 keypoints (normalized). This is what drives the avatar AND
     // what the skeleton overlay draws — one shared, stable screen-plane source.
@@ -494,6 +508,7 @@ public class MediaPipePoseDetector : MonoBehaviour
                 t.rotation = Quaternion.RotateTowards(t.rotation, _tPoseRot[(int)b],
                                                       restReturnDegPerSec * Time.deltaTime);
         }
+        EaseHipsHome();
     }
 
     // Cover-fit the landscape webcam into the (portrait) preview rect without distortion,
@@ -642,26 +657,60 @@ public class MediaPipePoseDetector : MonoBehaviour
         else
         {
             // Hips/pelvis first (root): knee-mid → hip-mid captures pelvic tilt.
-            TryDriveMidMid(HumanBodyBones.Hips,  kp, conf, L_KNEE, R_KNEE, L_HIP, R_HIP, t);
-            TryDriveMidMid(HumanBodyBones.Spine, kp, conf, L_HIP, R_HIP, L_SHOULDER, R_SHOULDER, t);
-            TryDriveMidMid(HumanBodyBones.Chest, kp, conf, L_SHOULDER, R_SHOULDER, L_EAR, R_EAR, t);
-            TryDriveMid  (HumanBodyBones.Neck,  kp, conf, L_SHOULDER, R_SHOULDER, NOSE, t);
+            TryDriveMidMid(HumanBodyBones.Hips,  kp, conf, L_KNEE, R_KNEE, L_HIP, R_HIP, t, followStrength);
+            TryDriveMidMid(HumanBodyBones.Spine, kp, conf, L_HIP, R_HIP, L_SHOULDER, R_SHOULDER, t, followStrength);
+            TryDriveMidMid(HumanBodyBones.Chest, kp, conf, L_SHOULDER, R_SHOULDER, L_EAR, R_EAR, t, followStrength);
+            TryDriveMid  (HumanBodyBones.Neck,  kp, conf, L_SHOULDER, R_SHOULDER, NOSE, t, followStrength);
         }
 
-        // Arms — always driven (the most reliable landmarks). Direct L→L / R→R mapping
-        // like the old version that worked; selfie mirroring is handled by flipX.
-        TryDrive(HumanBodyBones.LeftUpperArm,  kp, conf, L_SHOULDER, L_ELBOW, t);
-        TryDrive(HumanBodyBones.LeftLowerArm,  kp, conf, L_ELBOW,    L_WRIST, t);
-        TryDrive(HumanBodyBones.RightUpperArm, kp, conf, R_SHOULDER, R_ELBOW, t);
-        TryDrive(HumanBodyBones.RightLowerArm, kp, conf, R_ELBOW,    R_WRIST, t);
+        // Arms — cross-side mapping so the avatar copies the user same-side (selfie/front cam).
+        // On a front camera the image is already mirrored, so the COCO "left" shoulder is on
+        // the user's RIGHT side in the frame. Driving avatar-Left from COCO-Right (and vice
+        // versa) makes the avatar echo what the user is actually doing.
+        TryDrive(HumanBodyBones.LeftUpperArm,  kp, conf, R_SHOULDER, R_ELBOW, t, followStrength);
+        TryDrive(HumanBodyBones.LeftLowerArm,  kp, conf, R_ELBOW,    R_WRIST, t, followStrength);
+        TryDrive(HumanBodyBones.RightUpperArm, kp, conf, L_SHOULDER, L_ELBOW, t, followStrength);
+        TryDrive(HumanBodyBones.RightLowerArm, kp, conf, L_ELBOW,    L_WRIST, t, followStrength);
 
         if (!armsOnly)
         {
-            TryDrive(HumanBodyBones.LeftUpperLeg,  kp, conf, L_HIP,  L_KNEE,  t);
-            TryDrive(HumanBodyBones.LeftLowerLeg,  kp, conf, L_KNEE, L_ANKLE, t);
-            TryDrive(HumanBodyBones.RightUpperLeg, kp, conf, R_HIP,  R_KNEE,  t);
-            TryDrive(HumanBodyBones.RightLowerLeg, kp, conf, R_KNEE, R_ANKLE, t);
+            // Legs follow at a reduced strength (legSensitivity) — they're the noisiest joints.
+            float legStr = followStrength * legSensitivity;
+            TryDrive(HumanBodyBones.LeftUpperLeg,  kp, conf, R_HIP,  R_KNEE,  t, legStr);
+            TryDrive(HumanBodyBones.LeftLowerLeg,  kp, conf, R_KNEE, R_ANKLE, t, legStr);
+            TryDrive(HumanBodyBones.RightUpperLeg, kp, conf, L_HIP,  L_KNEE,  t, legStr);
+            TryDrive(HumanBodyBones.RightLowerLeg, kp, conf, L_KNEE, L_ANKLE, t, legStr);
+            ApplyHipSway(kp, conf, t);
         }
+    }
+
+    // Translate the hips (root) horizontally to mirror the user's side-to-side hip motion — the
+    // lateral SWAY that bone-rotation alone can't show. Same X convention as the limbs (flipX).
+    void ApplyHipSway(Vector2[] kp, float[] conf, float minConf)
+    {
+        if (!hipSway || !_hipsBaseCached) return;
+        var hips = _animator.GetBoneTransform(HumanBodyBones.Hips);
+        if (hips == null) return;
+        if (conf[L_HIP] < minConf || conf[R_HIP] < minConf) { EaseHipsHome(); return; }
+        float cx = (kp[L_HIP].x + kp[R_HIP].x) * 0.5f;   // hip-center, 0..1 across the frame
+        float off = (cx - 0.5f) * hipSwayScale;
+        if (flipX) off = -off;
+        Vector3 target = _hipsBaseLocalPos + new Vector3(off, 0f, 0f);
+        hips.localPosition = Vector3.Lerp(hips.localPosition, target, 0.35f);
+        if (debugLog && Time.time - _lastHipDbg > 0.5f)
+        {
+            _lastHipDbg = Time.time;
+            Debug.Log($"[HipSway] cx={cx:F2} off={off:F3} scale={hipSwayScale} " +
+                      $"hipsX={hips.localPosition.x:F3} baseX={_hipsBaseLocalPos.x:F3}");
+        }
+    }
+
+    // Ease the hips back to their base position (no pose / arms-only / low confidence).
+    void EaseHipsHome()
+    {
+        if (!_hipsBaseCached) return;
+        var hips = _animator.GetBoneTransform(HumanBodyBones.Hips);
+        if (hips != null) hips.localPosition = Vector3.Lerp(hips.localPosition, _hipsBaseLocalPos, 0.2f);
     }
 
     // Snap the torso, legs, neck and head to their rest (bind) rotations so the body stays
@@ -681,24 +730,32 @@ public class MediaPipePoseDetector : MonoBehaviour
             var t = _animator.GetBoneTransform(b);
             if (t != null) t.rotation = _tPoseRot[(int)b];
         }
+        if (_hipsBaseCached)
+        {
+            var hips = _animator.GetBoneTransform(HumanBodyBones.Hips);
+            if (hips != null) hips.localPosition = _hipsBaseLocalPos;
+        }
     }
 
-    void TryDrive(HumanBodyBones bone, Vector2[] kp, float[] conf, int from, int to, float minConf)
+    // strength = how strongly to drive this bone (followStrength for arms/torso; reduced by
+    // legSensitivity for legs). On low confidence the bone eases back to rest (RestBone) instead
+    // of freezing where it last was.
+    void TryDrive(HumanBodyBones bone, Vector2[] kp, float[] conf, int from, int to, float minConf, float strength)
     {
-        if (conf[from] < minConf || conf[to] < minConf) return;
-        DriveSegment2D(bone, kp[from], kp[to]);
+        if (conf[from] < minConf || conf[to] < minConf) { RestBone(bone); return; }
+        DriveSegment2D(bone, kp[from], kp[to], strength);
     }
 
-    void TryDriveMid(HumanBodyBones bone, Vector2[] kp, float[] conf, int fromA, int fromB, int to, float minConf)
+    void TryDriveMid(HumanBodyBones bone, Vector2[] kp, float[] conf, int fromA, int fromB, int to, float minConf, float strength)
     {
-        if (conf[fromA] < minConf || conf[fromB] < minConf || conf[to] < minConf) return;
-        DriveSegment2D(bone, (kp[fromA] + kp[fromB]) * 0.5f, kp[to]);
+        if (conf[fromA] < minConf || conf[fromB] < minConf || conf[to] < minConf) { RestBone(bone); return; }
+        DriveSegment2D(bone, (kp[fromA] + kp[fromB]) * 0.5f, kp[to], strength);
     }
 
-    void TryDriveMidMid(HumanBodyBones bone, Vector2[] kp, float[] conf, int fromA, int fromB, int toA, int toB, float minConf)
+    void TryDriveMidMid(HumanBodyBones bone, Vector2[] kp, float[] conf, int fromA, int fromB, int toA, int toB, float minConf, float strength)
     {
-        if (conf[fromA] < minConf || conf[fromB] < minConf || conf[toA] < minConf || conf[toB] < minConf) return;
-        DriveSegment2D(bone, (kp[fromA] + kp[fromB]) * 0.5f, (kp[toA] + kp[toB]) * 0.5f);
+        if (conf[fromA] < minConf || conf[fromB] < minConf || conf[toA] < minConf || conf[toB] < minConf) { RestBone(bone); return; }
+        DriveSegment2D(bone, (kp[fromA] + kp[fromB]) * 0.5f, (kp[toA] + kp[toB]) * 0.5f, strength);
     }
 
     // The proven 2D drive: build a screen-plane direction (z=0) from two keypoints and
@@ -708,7 +765,7 @@ public class MediaPipePoseDetector : MonoBehaviour
     // normalized image landmarks already use the y-down/x convention that maps directly to the
     // avatar (verified in-editor: negating inverts the body head-down). The gear-panel buttons
     // (ToggleMirror / ToggleUpDown) flip X / Y to correct the live front-camera mirror on device.
-    void DriveSegment2D(HumanBodyBones bone, Vector2 from2D, Vector2 to2D)
+    void DriveSegment2D(HumanBodyBones bone, Vector2 from2D, Vector2 to2D, float strength)
     {
         if (!_tPoseDir.ContainsKey(bone)) return;
         Transform t = _animator.GetBoneTransform(bone);
@@ -720,7 +777,19 @@ public class MediaPipePoseDetector : MonoBehaviour
         if (target.sqrMagnitude < 0.01f) return;
 
         Quaternion full = Quaternion.FromToRotation(_tPoseDir[bone], target) * _tPoseRot[(int)bone];
-        t.rotation = Quaternion.Slerp(_tPoseRot[(int)bone], full, followStrength);
+        t.rotation = Quaternion.Slerp(_tPoseRot[(int)bone], full, strength);
+    }
+
+    // Ease a single bone back toward its rest (bind T-pose) rotation. Used when a joint is
+    // not confidently detected this frame: instead of freezing the bone at its last driven
+    // angle (which leaves a limb stuck where it was when tracking dropped), we relax it home,
+    // so an off-camera / occluded leg or arm returns to the default pose. (Round 11.)
+    void RestBone(HumanBodyBones bone)
+    {
+        var t = _animator.GetBoneTransform(bone);
+        if (t != null)
+            t.rotation = Quaternion.RotateTowards(t.rotation, _tPoseRot[(int)bone],
+                                                  restReturnDegPerSec * Time.deltaTime);
     }
 
     // ---- T-pose caching (identical approach to PoseDetector.cs:194). ----
@@ -732,6 +801,8 @@ public class MediaPipePoseDetector : MonoBehaviour
             Transform t = _animator.GetBoneTransform(bone);
             if (t != null) _tPoseRot[(int)bone] = t.rotation;
         }
+        var hipsBase = _animator.GetBoneTransform(HumanBodyBones.Hips);
+        if (hipsBase != null) { _hipsBaseLocalPos = hipsBase.localPosition; _hipsBaseCached = true; }
         CacheDirFallback(HumanBodyBones.Hips, HumanBodyBones.Spine, HumanBodyBones.Chest);
         CacheDirFallback(HumanBodyBones.Spine, HumanBodyBones.Chest, HumanBodyBones.Neck);
         CacheDirFallback(HumanBodyBones.Chest, HumanBodyBones.UpperChest, HumanBodyBones.Neck);
