@@ -46,6 +46,40 @@ namespace Kinex.MegaDance
         }
 
         /// <summary>
+        /// Torso up-axis angle (hip-midpoint → shoulder-midpoint) in SegmentAngle space.
+        /// Subtracting this from every limb angle makes the whole signature relative to the
+        /// body's lean/rotation in the image plane, so a player who tilts or turns slightly
+        /// still scores the pose. Returns false (refAngle = 0) when the 4 torso keypoints
+        /// aren't confident enough to trust — callers then fall back to absolute angles.
+        /// conf=null (baker path) always trusts the rig joints.
+        /// </summary>
+        public static bool TryReferenceAngle(Vector2[] kp, float[] conf, float minConf, out float refAngle)
+        {
+            // Canonical upright torso (hip-mid directly below shoulder-mid) ≈ +90° in SegmentAngle
+            // space — verified identical for the player's MediaPipe image coords AND the baker's
+            // rig projection. This is the FALLBACK when the torso keypoints aren't confident.
+            //
+            // ⚠️ Why not 0: the baker is ALWAYS torso-relative (conf==null), so if the player snaps
+            // to absolute angles (refAngle=0) whenever shoulders/hips flicker below minConf, every
+            // limb is suddenly ~90° off the always-relative target → the score collapses to a
+            // random/low value the instant confidence dips. Falling back to the upright reference
+            // keeps the player in the SAME space as the target, so a held pose stays scored.
+            float uprightRef = Mathf.PI * 0.5f;
+
+            if (conf != null && (conf[L_SHOULDER] < minConf || conf[R_SHOULDER] < minConf ||
+                                 conf[L_HIP]      < minConf || conf[R_HIP]      < minConf))
+            {
+                refAngle = uprightRef;
+                return false;
+            }
+
+            Vector2 shoulderMid = (kp[L_SHOULDER] + kp[R_SHOULDER]) * 0.5f;
+            Vector2 hipMid      = (kp[L_HIP]      + kp[R_HIP])      * 0.5f;
+            refAngle = SegmentAngle(hipMid, shoulderMid);
+            return true;
+        }
+
+        /// <summary>
         /// Fill <paramref name="anglesOut"/> (length 8) with each limb's angle, and
         /// <paramref name="validOut"/> with whether both endpoints met confidence.
         /// Pass conf=null to treat every keypoint as confident (tests).
@@ -53,12 +87,13 @@ namespace Kinex.MegaDance
         public static void ComputeAngles(Vector2[] kp, float[] conf, float minConf,
                                          float[] anglesOut, bool[] validOut)
         {
+            TryReferenceAngle(kp, conf, minConf, out float refAngle); // 0 if torso untrusted
             for (int i = 0; i < NumLimbs; i++)
             {
                 int a = FromIdx[i], b = ToIdx[i];
                 bool ok = conf == null || (conf[a] >= minConf && conf[b] >= minConf);
                 validOut[i] = ok;
-                anglesOut[i] = ok ? SegmentAngle(kp[a], kp[b]) : 0f;
+                anglesOut[i] = ok ? SegmentAngle(kp[a], kp[b]) - refAngle : 0f;
             }
         }
 
@@ -72,6 +107,7 @@ namespace Kinex.MegaDance
         {
             if (target == null || target.Length < NumLimbs || toleranceRad <= 0f) return 0f;
 
+            TryReferenceAngle(kp, conf, minConf, out float refAngle); // 0 if torso untrusted
             float sum = 0f;
             int count = 0;
             for (int i = 0; i < NumLimbs; i++)
@@ -79,7 +115,7 @@ namespace Kinex.MegaDance
                 int a = FromIdx[i], b = ToIdx[i];
                 if (conf != null && (conf[a] < minConf || conf[b] < minConf)) continue;
 
-                float playerAngle = SegmentAngle(kp[a], kp[b]);
+                float playerAngle = SegmentAngle(kp[a], kp[b]) - refAngle;
                 float err = AngleError(playerAngle, target[i]);
                 sum += Mathf.Max(0f, 1f - err / toleranceRad);
                 count++;

@@ -36,6 +36,15 @@ namespace Kinex.MegaDance
         [Tooltip("Per-limb angle tolerance (degrees). Bigger = more forgiving.")]
         public float toleranceDegrees = 45f;
         [Range(0f, 1f)] public float minConfidence = 0.3f;
+        [Tooltip("Score smoothing per frame (0 = frozen, 1 = no smoothing). Lower = steadier % and " +
+                 "fewer false passes from keypoint jitter, but slower to react.")]
+        [Range(0.05f, 1f)] public float scoreSmoothing = 0.25f;
+        [Tooltip("Seconds the smoothed score must stay at/above passThreshold before the pose clears. " +
+                 "Stops a single lucky/jittery frame from passing.")]
+        public float holdToPassSeconds = 0.4f;
+        [Tooltip("Log per-limb player-vs-target angles to logcat (~2x/sec) while Playing, so we can " +
+                 "see WHY a held pose scores low (mirror? Y-flip? just a non-matching target pose?).")]
+        public bool scoreDebugLog = true;
 
         [Header("Timing")]
         [Tooltip("Get-ready countdown shown on the FirstPose screen before scoring starts.")]
@@ -63,19 +72,43 @@ namespace Kinex.MegaDance
         [Tooltip("The 'NEXT' skip button — shown only while a game is in progress.")]
         public GameObject debugNextButton;
 
+        [Header("Settings gear (Camera/Calibration)")]
+        [Tooltip("The gear / settings button. Assign the SettingsGear object from the StartPanel so it " +
+                 "stays visible as a small corner icon after auto-start (the StartPanel itself is hidden).")]
+        public GameObject settingsGearButton;
+
         State _state = State.Idle;
         int _poseIndex;                      // current target pose; trainer animates to it on EnterPlaying
         float[][] _signatures;               // [pose][8] baked angle targets
         readonly PoseSignatureBaker _baker = new PoseSignatureBaker();
+        float _smoothedScore;                // EMA of ReadScore; what the HUD shows and the pass tests
+        float _aboveSince = -1f;             // Time.time the score first crossed passThreshold; -1 = below
 
         void Start()
         {
-            ShowOnly(startPanel);
-            if (debugNextButton != null) debugNextButton.SetActive(false); // hidden on the Start screen
+            // Auto-start: skip the StartPanel so Flutter's tap is the only start needed.
+            // The StartPanel is never shown; gameplay begins immediately after one frame
+            // (gives Unity time to finish scene initialisation before baking signatures).
+            SetPanels(instruction: false, hud: false, correct: false, results: false, start: false);
+            if (debugNextButton != null) debugNextButton.SetActive(false);
             _state = State.Idle;
+            StartCoroutine(AutoStart());
         }
 
-        /// <summary>Hooked to the green Start button (and the results Retry button).</summary>
+        // Wait one frame so all Awake/Start calls on other objects (trainer, detector) complete,
+        // then kick off gameplay automatically — no second "Start" tap required on the Unity side.
+        IEnumerator AutoStart()
+        {
+            yield return null; // one frame
+            // Re-show the settings gear as a standalone corner icon so Mirror/Sens/Calibrate
+            // remain accessible during gameplay even though the StartPanel is hidden.
+            if (settingsGearButton != null) settingsGearButton.SetActive(true);
+            StartGame();
+        }
+
+        /// <summary>Hooked to the green Start button (and the results Retry button).
+        /// Begins gameplay immediately — no calibration gate. The avatar drives from its
+        /// geometric T-pose so calibration is not required for correct tracking.</summary>
         public void StartGame()
         {
             if (trainer == null) { Debug.LogError("[MegaDanceManager] trainer not assigned."); return; }
@@ -83,6 +116,25 @@ namespace Kinex.MegaDance
             if (debugNextButton != null) debugNextButton.SetActive(true); // visible once the game starts
             BakeSignatures();
             GoToFirstPose(0);
+        }
+
+        // Kept so external references (UI buttons, other scripts) that call CalibrateThenStart
+        // don't break at compile time. It delegates straight to StartGame so the behaviour is
+        // identical — no calibration countdown is run.
+        IEnumerator CalibrateThenStart()
+        {
+            StartGame();
+            yield break;
+        }
+
+        /// <summary>
+        /// Back button → return to the Flutter home screen. flutter_embed_unity routes this
+        /// to MegaDanceGameScreen.onMessageFromUnity, which does context.go('/home'). Same
+        /// {"type":"exit"} contract Kinex World uses. In the editor SendToFlutter just logs.
+        /// </summary>
+        public void ExitToHome()
+        {
+            SendToFlutter.Send("{\"type\":\"exit\"}");
         }
 
         // Bake all target signatures once by snapping the rig through every pose and
@@ -139,6 +191,8 @@ namespace Kinex.MegaDance
             SetPanels(instruction: false, hud: true, correct: false, results: false, start: false);
             if (matchBarFill != null) matchBarFill.fillAmount = 0f;
             if (percentText != null)  percentText.text = "0%";
+            _smoothedScore = 0f;
+            _aboveSince = -1f;
             _state = State.Playing;
         }
 
@@ -146,11 +200,20 @@ namespace Kinex.MegaDance
         {
             if (_state != State.Playing) return;
 
-            float score = ReadScore();
-            if (matchBarFill != null) matchBarFill.fillAmount = score;
-            if (percentText != null)  percentText.text = $"{Mathf.RoundToInt(score * 100f)}%";
+            // EMA so per-frame keypoint jitter doesn't flicker the % or trip a false pass.
+            float raw = ReadScore();
+            _smoothedScore = Mathf.Lerp(_smoothedScore, raw, scoreSmoothing);
 
-            if (score >= passThreshold) StartCoroutine(CorrectSequence());
+            if (matchBarFill != null) matchBarFill.fillAmount = _smoothedScore;
+            if (percentText != null)  percentText.text = $"{Mathf.RoundToInt(_smoothedScore * 100f)}%";
+
+            // Hold-to-pass: the smoothed score must stay at/above threshold continuously.
+            if (_smoothedScore >= passThreshold)
+            {
+                if (_aboveSince < 0f) _aboveSince = Time.time;
+                if (Time.time - _aboveSince >= holdToPassSeconds) StartCoroutine(CorrectSequence());
+            }
+            else _aboveSince = -1f;
         }
 
         // 0..1 match for the current pose. Stub: SPACE held = 100%. Real: keypoints vs signature.
@@ -160,9 +223,37 @@ namespace Kinex.MegaDance
                 return (Keyboard.current != null && Keyboard.current.spaceKey.isPressed) ? 1f : 0f;
 
             if (poseDetector == null || !poseDetector.HasPose || _signatures == null) return 0f;
-            return PoseScorer.Score(poseDetector.LatestKeypoints, poseDetector.LatestConfidence,
-                                    _signatures[trainer.CurrentPose], minConfidence,
-                                    toleranceDegrees * Mathf.Deg2Rad);
+            float[] target = _signatures[trainer.CurrentPose];
+            float score = PoseScorer.Score(poseDetector.LatestKeypoints, poseDetector.LatestConfidence,
+                                           target, minConfidence, toleranceDegrees * Mathf.Deg2Rad);
+            if (scoreDebugLog) LogScoreBreakdown(target, score);
+            return score;
+        }
+
+        // Periodic per-limb diagnostic: for each of the 8 limbs, print the player's angle, the
+        // baked target angle, and the error (degrees). Read in `adb logcat -s Unity` while holding
+        // a pose to see exactly which limbs disagree — distinguishes a mirror/Y-flip bug (whole
+        // sides systematically off) from simply not matching the current target pose.
+        float _lastScoreDbg;
+        readonly float[] _dbgAngles = new float[PoseScorer.NumLimbs];
+        readonly bool[] _dbgValid = new bool[PoseScorer.NumLimbs];
+        static readonly string[] _limbNames = { "L_uArm", "R_uArm", "L_lArm", "R_lArm",
+                                                "L_uLeg", "R_uLeg", "L_lLeg", "R_lLeg" };
+        void LogScoreBreakdown(float[] target, float score)
+        {
+            if (Time.time - _lastScoreDbg < 0.5f) return;
+            _lastScoreDbg = Time.time;
+            PoseScorer.ComputeAngles(poseDetector.LatestKeypoints, poseDetector.LatestConfidence,
+                                     minConfidence, _dbgAngles, _dbgValid);
+            var sb = new System.Text.StringBuilder();
+            sb.Append($"[PoseScore] pose={trainer.CurrentPose + 1} score={score:F2} tol={toleranceDegrees}°");
+            for (int i = 0; i < PoseScorer.NumLimbs; i++)
+            {
+                if (!_dbgValid[i]) { sb.Append($" {_limbNames[i]}=offcam"); continue; }
+                float errDeg = PoseScorer.AngleError(_dbgAngles[i], target[i]) * Mathf.Rad2Deg;
+                sb.Append($" {_limbNames[i]}:p{_dbgAngles[i] * Mathf.Rad2Deg:F0}/t{target[i] * Mathf.Rad2Deg:F0}/e{errDeg:F0}");
+            }
+            Debug.Log(sb.ToString());
         }
 
         IEnumerator CorrectSequence()

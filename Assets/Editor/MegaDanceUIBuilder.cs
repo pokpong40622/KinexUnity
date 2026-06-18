@@ -27,11 +27,16 @@ namespace Kinex.MegaDance.EditorTools
         static readonly Color Green     = new Color32(0x6F, 0xCF, 0x3A, 0xFF); // Start button / Correct
         static readonly Color OutlineGray = new Color32(0x6B, 0x6B, 0x6B, 0xFF);
         static readonly Color PanelDim   = new Color(0, 0, 0, 0.18f);          // slight scrim on Correct
+        // App design-language tones (mirrors KColors) for the in-game HUD cards.
+        static readonly Color CardWhite = new Color32(0xFF, 0xFF, 0xFF, 0xF7);
+        static readonly Color Navy      = new Color32(0x1F, 0x2F, 0x66, 0xFF);
+        static readonly Color Track     = new Color32(0xE3, 0xE6, 0xEE, 0xFF);
 
         const string BlackPath = "Assets/Fonts/Montserrat-Black SDF.asset";        // Figma title weight (900)
         const string ItalicPath = "Assets/Fonts/Montserrat-BlackItalic SDF.asset";  // MEGA DANCE / Correct!
         const string SemiPath = "Assets/Fonts/Montserrat-SemiBold SDF.asset";        // body
-        const string BackSpritePath = "Assets/Art/MegaDanceUI/back_button.png";
+        const string BackSpritePath  = "Assets/Art/MegaDanceUI/back_button.png";
+        const string LogoSpritePath  = "Assets/Art/MegaDanceUI/megadance_logo.png";
         const string StartSpritePath = "Assets/Art/MegaDanceUI/start_button.png";
         const string CardSpritePath = "Assets/Art/MegaDanceUI/card_frame.png";
         const string GearSpritePath = "Assets/Art/MegaDanceUI/gear.png";
@@ -39,7 +44,7 @@ namespace Kinex.MegaDance.EditorTools
         [MenuItem("Kinex/Build MegaDance UI")]
         public static void Build()
         {
-            EditorUtility.DisplayDialog("Build MegaDance UI", BuildUI(), "OK");
+            Debug.Log("[MegaDanceUIBuilder] " + BuildUI());
         }
 
         // The actual work, with no modal dialog so it can be driven from automation. Returns a status string.
@@ -77,41 +82,60 @@ namespace Kinex.MegaDance.EditorTools
             hud.GetComponent<Image>().color = clear;
 
             // Retire the stray root back button (the 3D scene + avatar is the background). Remove any
-            // previous canvas-level gear (it now lives on the Start screen). The CameraFeedPanel is
+            // previous canvas-level gear (rebuilt below at canvas root). The CameraFeedPanel is
             // kept and repurposed as the always-on corner preview (see BuildCornerPreview).
             for (int i = canvas.transform.childCount - 1; i >= 0; i--)
             {
                 var c = canvas.transform.GetChild(i);
                 if (c.name == "BackButton") c.gameObject.SetActive(false);
-                if (c.name == "SettingsGear") Object.DestroyImmediate(c.gameObject);
-                if (c.name == "DebugNextButton") Object.DestroyImmediate(c.gameObject);
+                else if (c.name == "SettingsGear") Object.DestroyImmediate(c.gameObject);
+                else if (c.name == "DebugNextButton") Object.DestroyImmediate(c.gameObject);
             }
 
             // Calibration popup (created/refreshed here) + the gear that opens it. Built before the
             // Start screen so the gear button can be wired to the panel's Open().
             var calPanel = BuildCalibration(canvas, manager.gameObject, black, semi);
 
-            // =================== START ===================
-            // Live room background shows through (panel is transparent). Back + MEGA DANCE + Start.
-            AddBackButton(startPanel.transform, backSprite);
-            var megaTitle = AddText(startPanel.transform, "MEGA\nDANCE", italic, 150, FontStyles.Normal,
-                                    Color.white, TextAlignmentOptions.Center);
-            Place(megaTitle.rectTransform, 80, 300, 767, 380);
-            Outline(megaTitle, OutlineGray, 0.25f);
-            var startBtn = AddSpriteButton(startPanel.transform, "StartButton", startSprite, manager);
-            Place(startBtn, 220, 1180, 487, 195);
-            // Gear opens the calibration popup. Tucked under the back button (top-left) so it
-            // stays clear of the MEGA DANCE title.
-            var gear = AddImage(startPanel.transform, "SettingsGear", LoadSprite(GearSpritePath), Color.white);
+            // Settings gear — placed at CANVAS ROOT (not inside StartPanel) so it persists as a
+            // small corner icon after auto-start hides the StartPanel. MegaDanceManager.settingsGearButton
+            // is assigned to this object; the AutoStart coroutine re-shows it after startup.
+            var gear = AddImage(canvas.transform, "SettingsGear", LoadSprite(GearSpritePath), Color.white);
             gear.raycastTarget = true;
             Place(gear.rectTransform, 58, 240, 108, 108);
             var gearBtn = gear.gameObject.AddComponent<Button>();
             if (calPanel != null) UnityEditor.Events.UnityEventTools.AddPersistentListener(gearBtn.onClick, calPanel.Open);
+            // Wire the manager field so AutoStart can find and re-show it.
+            so.FindProperty("settingsGearButton").objectReferenceValue = gear.gameObject;
+            // Hidden at scene start (auto-start will re-show it after one frame).
+            gear.gameObject.SetActive(false);
+
+            // =================== START ===================
+            // Live room shows through (panel is transparent). Back button (top-left) + logo image
+            // (centered, from Figma MegaDanceLogo group) + green Start button (bottom-center).
+            // Figma frame: 927×1427. Group 41 at (45,62). Back button: 162×162 at (0,0) in group → frame (45,62).
+            // MegaDanceLogo: 773×408 at (57.52,262) in group → frame (102,324). Start btn: 416×161 at (259,1158).
+            AddBackButton(startPanel.transform, backSprite, manager);
+            var logoSprite = LoadSprite(LogoSpritePath);
+            var logoImg = AddImage(startPanel.transform, "MegaDanceLogo", logoSprite, Color.white);
+            logoImg.preserveAspect = true;
+            Place(logoImg.rectTransform, 102, 324, 773, 408);
+            // Start button: green (#6DDB2A) pill matching Figma Group 3 / Rectangle 5 gradient bottom color.
+            var startBtnGo = AddImage(startPanel.transform, "StartButton",
+                                      AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/UISprite.psd"),
+                                      new Color32(0x6D, 0xDB, 0x2A, 0xFF));
+            startBtnGo.type = Image.Type.Sliced;
+            startBtnGo.raycastTarget = true;
+            Place(startBtnGo.rectTransform, 259, 1158, 416, 161);
+            var startBtnComp = startBtnGo.gameObject.AddComponent<Button>();
+            UnityEditor.Events.UnityEventTools.AddPersistentListener(startBtnComp.onClick, manager.StartGame);
+            var startLabel = AddText(startBtnGo.transform, "Start", black, 70, FontStyles.Normal,
+                                     Color.white, TextAlignmentOptions.Center);
+            Stretch(startLabel.rectTransform);
 
             // =================== FIRST POSE ===================
             // White card (border sprite) holds: title, "Do this pose", the target-pose image,
             // and the big get-ready countdown overlay.
-            AddBackButton(firstPose.transform, backSprite);
+            AddBackButton(firstPose.transform, backSprite, manager);
             // Smaller, centred, see-through card so the live 3D room shows both around AND through it
             // — it reads as a popup floating over the same room as the Start/Playing screens (Figma).
             var card = AddImage(firstPose.transform, "Card", cardSprite, new Color(1f, 1f, 1f, 0.82f));
@@ -139,32 +163,34 @@ namespace Kinex.MegaDance.EditorTools
             Outline(countdown, new Color32(0x10, 0x3A, 0x05, 0xFF), 0.3f);
 
             // =================== PLAYING (HUD) ===================
-            // Camera feed shows behind. Top title, bottom percentage strip, thin match bar.
-            AddBackButton(hud.transform, backSprite);
-            var hudTitle = AddText(hud.transform, "Pose 1", black, 84, FontStyles.Normal,
-                                   Color.white, TextAlignmentOptions.Center);
-            Place(hudTitle.rectTransform, 213, 95, 500, 120);
-            Outline(hudTitle, OutlineGray, 0.22f);
+            // Camera feed shows behind. App-style white cards: a top pose pill (left of the
+            // corner camera preview) and a bottom score card with the green match bar.
+            AddBackButton(hud.transform, backSprite, manager);
+            AddCard(hud.transform, 165, 48, 470, 110);
+            var hudTitle = AddText(hud.transform, "Pose 1", black, 50, FontStyles.Normal,
+                                   Navy, TextAlignmentOptions.Center);
+            Place(hudTitle.rectTransform, 185, 64, 430, 78);
 
-            // Match bar (BG + fill) just above the percentage strip.
-            var barBg = AddImage(hud.transform, "MatchBarBG", null, new Color(0, 0, 0, 0.45f));
-            Place(barBg.rectTransform, 56, 1210, 814, 36);
-            var barFill = AddImage(hud.transform, "MatchBarFill", null, Green);
+            // Bottom score card: big navy percent + green match bar.
+            AddCard(hud.transform, 56, 1090, 815, 285);
+            var percent = AddText(hud.transform, "0%", black, 110, FontStyles.Normal,
+                                  Navy, TextAlignmentOptions.Center);
+            Place(percent.rectTransform, 96, 1110, 735, 140);
+            var barBg = AddImage(hud.transform, "MatchBarBG", null, Track);
+            Round(barBg);
+            Place(barBg.rectTransform, 116, 1270, 695, 36);
+            var barFill = AddImage(barBg.transform, "MatchBarFill", null, Green);
+            Round(barFill);
             barFill.type = Image.Type.Filled;
             barFill.fillMethod = Image.FillMethod.Horizontal;
             barFill.fillOrigin = (int)Image.OriginHorizontal.Left;
             barFill.fillAmount = 0f;
-            var bf = barFill.rectTransform; bf.SetParent(barBg.transform, false);
+            var bf = barFill.rectTransform;
             bf.anchorMin = Vector2.zero; bf.anchorMax = Vector2.one; bf.offsetMin = Vector2.zero; bf.offsetMax = Vector2.zero;
-
-            var percent = AddText(hud.transform, "0%", black, 96, FontStyles.Normal,
-                                  Color.white, TextAlignmentOptions.Center);
-            Place(percent.rectTransform, 56, 1270, 814, 120);
-            Outline(percent, OutlineGray, 0.22f);
 
             // =================== CORRECT ===================
             correct.GetComponent<Image>().color = PanelDim; // light scrim over the frozen scene
-            AddBackButton(correct.transform, backSprite);
+            AddBackButton(correct.transform, backSprite, manager);
             var corSmall = AddText(correct.transform, "Pose 1", black, 70, FontStyles.Normal,
                                    Color.white, TextAlignmentOptions.Center);
             Place(corSmall.rectTransform, 213, 470, 500, 90);
@@ -354,12 +380,14 @@ namespace Kinex.MegaDance.EditorTools
             }
         }
 
-        static void AddBackButton(Transform parent, Sprite sprite)
+        static void AddBackButton(Transform parent, Sprite sprite, MegaDanceManager manager)
         {
             var img = AddImage(parent, "BackButton", sprite, Color.white);
-            img.gameObject.AddComponent<Button>();
+            img.raycastTarget = true; // AddImage defaults to false; a button needs this to receive taps
+            var btn = img.gameObject.AddComponent<Button>();
+            // Back → Flutter home (manager.ExitToHome sends {"type":"exit"}).
+            UnityEditor.Events.UnityEventTools.AddPersistentListener(btn.onClick, manager.ExitToHome);
             Place(img.rectTransform, 45, 62, 162, 162); // matches Figma Group 37
-            // (No onClick wired — navigation back to Flutter/menu is handled elsewhere.)
         }
 
         static Image AddImage(Transform parent, string name, Sprite sprite, Color color)
@@ -371,6 +399,24 @@ namespace Kinex.MegaDance.EditorTools
             img.color = color;
             img.raycastTarget = false;
             return img;
+        }
+
+        // A white rounded card with a soft drop shadow — the app's core container.
+        static GameObject AddCard(Transform parent, float x, float y, float w, float h)
+        {
+            var img = AddImage(parent, "Card", null, CardWhite);
+            Round(img);
+            var sh = img.gameObject.AddComponent<Shadow>();
+            sh.effectColor = new Color(0, 0, 0, 0.25f);
+            sh.effectDistance = new Vector2(0, 6);
+            Place(img.rectTransform, x, y, w, h);
+            return img.gameObject;
+        }
+
+        static void Round(Image img)
+        {
+            var ui = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/UISprite.psd");
+            if (ui != null) { img.sprite = ui; img.type = Image.Type.Sliced; }
         }
 
         static RectTransform AddSpriteButton(Transform parent, string name, Sprite sprite, MegaDanceManager manager)
