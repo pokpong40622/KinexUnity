@@ -22,6 +22,11 @@ namespace Kinex.SpikeTools
         [MenuItem("Kinex/Spike Export Android (ARM64)")]
         public static void ExportAndroid()
         {
+            // We only use SherpaOnnx TTS (the voice coach), not ASR. The package's ASR module
+            // defaults to enabled and its build validator hard-fails Android builds unless a
+            // RECORD_AUDIO AndroidManifest exists. Disable ASR so the app needs no mic permission.
+            DisableSherpaAsr();
+
             PlayerSettings.Android.applicationEntry = AndroidApplicationEntry.Activity;
             // Unity 6 dropped general x86_64 Android support (it's Magic-Leap-only now), so real
             // ARM64 devices are the only target. Emulators must be arm64-v8a images.
@@ -76,6 +81,30 @@ namespace Kinex.SpikeTools
             export.Invoke(inst, new object[] { opts, new List<string>() });
             Debug.Log("[SpikeExporter] Export call returned. build.gradle exists=" +
                       File.Exists(Path.Combine(ExportPath, "build.gradle")));
+        }
+
+        // AsrProjectSettings is internal to the SherpaOnnx editor assembly, so reach it via reflection.
+        static void DisableSherpaAsr()
+        {
+            Type t = null;
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                t = asm.GetType("PonyuDev.SherpaOnnx.Editor.AsrInstall.Settings.AsrProjectSettings");
+                if (t != null) break;
+            }
+            if (t == null) { Debug.Log("[SpikeExporter] AsrProjectSettings not found; skipping ASR disable."); return; }
+
+            var instProp = t.GetProperty("instance",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.FlattenHierarchy);
+            var inst = instProp?.GetValue(null);
+            if (inst == null) { Debug.LogWarning("[SpikeExporter] AsrProjectSettings.instance null; skipping ASR disable."); return; }
+
+            var field = t.GetField("asrEnabled", BindingFlags.Public | BindingFlags.Instance);
+            if (field == null) { Debug.LogWarning("[SpikeExporter] asrEnabled field not found; skipping ASR disable."); return; }
+
+            field.SetValue(inst, false);
+            t.GetMethod("SaveSettings", BindingFlags.Public | BindingFlags.Instance)?.Invoke(inst, null);
+            Debug.Log("[SpikeExporter] SherpaOnnx ASR disabled (asrEnabled=false).");
         }
     }
 }

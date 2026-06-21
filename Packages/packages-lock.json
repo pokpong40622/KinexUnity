@@ -10,6 +10,13 @@
       },
       "hash": "78ee5418415953b79c358bfe6355fcc3fde7912b"
     },
+    "com.cysharp.unitask": {
+      "version": "2.5.10",
+      "depth": 0,
+      "source": "registry",
+      "dependencies": {},
+      "url": "https://package.openupm.com"
+    },
     "com.github.homuler.mediapipe": {
       "version": "file:../LocalPackages/com.github.homuler.mediapipe-0.16.3.tgz",
       "depth": 0,
@@ -25,6 +32,16 @@
       "source": "git",
       "dependencies": {},
       "hash": "32d6b2d28c15616a274853631942dcff4dcffed2"
+    },
+    "com.ponyudev.sherpa-onnx": {
+      "version": "0.2.0",
+      "depth": 0,
+      "source": "registry",
+      "dependencies": {
+        "com.cysharp.unitask": "2.5.10",
+        "com.unity.sharp-zip-lib": "1.4.1"
+      },
+      "url": "https://package.openupm.com"
     },
     "com.unity.ai.inference": {
       "version": "2.5.0",
@@ -235,6 +252,13 @@
         "com.unity.render-pipelines.core": "17.4.0",
         "com.unity.searcher": "4.9.3"
       }
+    },
+    "com.unity.sharp-zip-lib": {
+      "version": "1.4.1",
+      "depth": 1,
+      "source": "registry",
+      "dependencies": {},
+      "url": "https://packages.unity.com"
     },
     "com.unity.test-framework": {
       "version": "1.6.0",

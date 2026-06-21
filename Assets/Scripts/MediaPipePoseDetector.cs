@@ -131,6 +131,11 @@ public class MediaPipePoseDetector : MonoBehaviour
     public float[] LatestConfidence { get; private set; }
     public bool HasPose { get; private set; }
 
+    /// <summary>The driven avatar's humanoid Animator (this component lives on the avatar).
+    /// Scoring bakes this rig and compares it to the trainer rig, so "avatar looks like the
+    /// trainer = high score" — independent of camera mirror / skeleton-overlay orientation.</summary>
+    public Animator AvatarAnimator => _animator;
+
     // ---- Preview cover-crop, computed at runtime from the real webcam aspect so the
     //      skeleton overlay can map landmarks onto exactly what the preview shows. ----
     [Header("Preview")]

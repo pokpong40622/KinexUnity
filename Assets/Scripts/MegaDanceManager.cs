@@ -25,6 +25,11 @@ namespace Kinex.MegaDance
         [Header("Trainer")]
         public TrainerPoseController trainer;
 
+        [Header("Voice (optional)")]
+        [Tooltip("Offline Piper voice that speaks the countdown + coaching hints. " +
+                 "Leave unassigned to run silent.")]
+        public VoiceCoach voice;
+
         [Header("Scoring source")]
         [Tooltip("Hold SPACE = 100% match. Bypasses real pose scoring until the webcam is wired.")]
         public bool useKeyboardStub = true;
@@ -51,6 +56,11 @@ namespace Kinex.MegaDance
         public int firstPoseCountdown = 3;
         [Tooltip("Seconds the big 'Correct!' overlay stays up before the next pose.")]
         public float correctHoldSeconds = 1.2f;
+
+        [Header("Game feel")]
+        [Tooltip("Pass a pose within this many seconds of it starting to keep/extend your combo. " +
+                 "Slower than this resets the combo to 1.")]
+        public float comboWindowSeconds = 6f;
 
         [Header("UI — panels")]
         public GameObject startPanel;
@@ -83,6 +93,13 @@ namespace Kinex.MegaDance
         readonly PoseSignatureBaker _baker = new PoseSignatureBaker();
         float _smoothedScore;                // EMA of ReadScore; what the HUD shows and the pass tests
         float _aboveSince = -1f;             // Time.time the score first crossed passThreshold; -1 = below
+        int _combo;                          // consecutive FAST passes (rising chime + "Combo xN!")
+        float _poseStartTime;                // Time.time EnterPlaying ran — drives the combo window
+        bool _greenCued;                     // played the "you're in the zone" cue once this pose?
+
+        TMP_Text _hintText;                  // bottom-strip coaching line, created at runtime
+        float _lastHintAt;                   // throttle the hint refresh
+        readonly float[] _avatarAngles = new float[PoseScorer.NumLimbs]; // baked avatar rig, scored vs trainer
 
         void Start()
         {
@@ -113,6 +130,11 @@ namespace Kinex.MegaDance
         {
             if (trainer == null) { Debug.LogError("[MegaDanceManager] trainer not assigned."); return; }
             trainer.autoAdvance = false; // the manager controls progression, not the trainer
+            trainer.blendTime = 0.8f;    // ~15% slower pose-to-pose blend so it's easier to follow
+            toleranceDegrees = 55f;      // a bit more forgiving so 70% (and combos) are reachable
+            // Talk more often (default gap is 2s) so coaching feels responsive.
+            if (voice != null) voice.minGapSeconds = 0.7f;
+            _combo = 0;
             if (debugNextButton != null) debugNextButton.SetActive(true); // visible once the game starts
             BakeSignatures();
             GoToFirstPose(0);
@@ -169,17 +191,24 @@ namespace Kinex.MegaDance
                 if (sprite != null) poseImage.sprite = sprite;
             }
             SetPanels(instruction: true, hud: false, correct: false, results: false, start: false);
+            Kinex.Sfx.Play("pose_appear"); // soft whoosh as the new pose card shows
             StartCoroutine(FirstPoseRoutine());
         }
 
         IEnumerator FirstPoseRoutine()
         {
             _state = State.FirstPose;
+            // Arcade-style get-ready: a beep on each 3-2-1 tick, then a bright "GO!" (sounds
+            // only — no spoken "three two one", which the user found annoying).
             for (int t = firstPoseCountdown; t > 0; t--)
             {
                 if (countdownText != null) countdownText.text = t.ToString();
+                Kinex.Sfx.Play("beep");
                 yield return new WaitForSeconds(1f);
             }
+            if (countdownText != null) countdownText.text = "GO!";
+            Kinex.Sfx.Play("go");
+            yield return new WaitForSeconds(0.35f);
             if (countdownText != null) countdownText.text = "";
             EnterPlaying();
         }
@@ -189,10 +218,15 @@ namespace Kinex.MegaDance
         {
             trainer.ShowPose(_poseIndex); // animate into the pose now that the card is gone (visible)
             SetPanels(instruction: false, hud: true, correct: false, results: false, start: false);
+            Kinex.ScoreHud.EnsurePassLine(matchBarFill); // 70% target marker on the bar (idempotent)
+            EnsureHintText();
+            if (_hintText != null) _hintText.text = "";
             if (matchBarFill != null) matchBarFill.fillAmount = 0f;
             if (percentText != null)  percentText.text = "0%";
             _smoothedScore = 0f;
             _aboveSince = -1f;
+            _poseStartTime = Time.time;
+            _greenCued = false;
             _state = State.Playing;
         }
 
@@ -206,11 +240,15 @@ namespace Kinex.MegaDance
 
             if (matchBarFill != null) matchBarFill.fillAmount = _smoothedScore;
             if (percentText != null)  percentText.text = $"{Mathf.RoundToInt(_smoothedScore * 100f)}%";
+            Kinex.ScoreHud.Apply(percentText, matchBarFill, _smoothedScore); // colour by band (<50 red, <70 yellow, >=70 green)
+
+            UpdateHint(); // bottom coaching line: "Move <limb> up/down/left/right" (throttled)
 
             // Hold-to-pass: the smoothed score must stay at/above threshold continuously.
             if (_smoothedScore >= passThreshold)
             {
                 if (_aboveSince < 0f) _aboveSince = Time.time;
+                if (!_greenCued) { _greenCued = true; Kinex.Sfx.Play("zone", 1f); } // "you're in the zone — hold it!"
                 if (Time.time - _aboveSince >= holdToPassSeconds) StartCoroutine(CorrectSequence());
             }
             else _aboveSince = -1f;
@@ -223,9 +261,14 @@ namespace Kinex.MegaDance
                 return (Keyboard.current != null && Keyboard.current.spaceKey.isPressed) ? 1f : 0f;
 
             if (poseDetector == null || !poseDetector.HasPose || _signatures == null) return 0f;
+            // Score the DRIVEN AVATAR rig vs the trainer rig (both baked the same way) so the score
+            // rewards making the avatar look like the trainer — not matching the mirrored camera
+            // skeleton. The avatar's bones already encode the selfie-mirror/cross-map, so there's no
+            // left/right ambiguity here.
+            if (poseDetector.AvatarAnimator == null) return 0f;
+            _baker.BakeFromRigInto(poseDetector.AvatarAnimator, _avatarAngles);
             float[] target = _signatures[trainer.CurrentPose];
-            float score = PoseScorer.Score(poseDetector.LatestKeypoints, poseDetector.LatestConfidence,
-                                           target, minConfidence, toleranceDegrees * Mathf.Deg2Rad);
+            float score = PoseScorer.ScoreAngles(_avatarAngles, target, toleranceDegrees * Mathf.Deg2Rad);
             if (scoreDebugLog) LogScoreBreakdown(target, score);
             return score;
         }
@@ -235,34 +278,115 @@ namespace Kinex.MegaDance
         // a pose to see exactly which limbs disagree — distinguishes a mirror/Y-flip bug (whole
         // sides systematically off) from simply not matching the current target pose.
         float _lastScoreDbg;
-        readonly float[] _dbgAngles = new float[PoseScorer.NumLimbs];
-        readonly bool[] _dbgValid = new bool[PoseScorer.NumLimbs];
         static readonly string[] _limbNames = { "L_uArm", "R_uArm", "L_lArm", "R_lArm",
                                                 "L_uLeg", "R_uLeg", "L_lLeg", "R_lLeg" };
+        // Per-limb avatar-vs-trainer breakdown (degrees): a=avatar rig, t=trainer target, e=error.
         void LogScoreBreakdown(float[] target, float score)
         {
             if (Time.time - _lastScoreDbg < 0.5f) return;
             _lastScoreDbg = Time.time;
-            PoseScorer.ComputeAngles(poseDetector.LatestKeypoints, poseDetector.LatestConfidence,
-                                     minConfidence, _dbgAngles, _dbgValid);
             var sb = new System.Text.StringBuilder();
             sb.Append($"[PoseScore] pose={trainer.CurrentPose + 1} score={score:F2} tol={toleranceDegrees}°");
             for (int i = 0; i < PoseScorer.NumLimbs; i++)
             {
-                if (!_dbgValid[i]) { sb.Append($" {_limbNames[i]}=offcam"); continue; }
-                float errDeg = PoseScorer.AngleError(_dbgAngles[i], target[i]) * Mathf.Rad2Deg;
-                sb.Append($" {_limbNames[i]}:p{_dbgAngles[i] * Mathf.Rad2Deg:F0}/t{target[i] * Mathf.Rad2Deg:F0}/e{errDeg:F0}");
+                float errDeg = PoseScorer.AngleError(_avatarAngles[i], target[i]) * Mathf.Rad2Deg;
+                sb.Append($" {_limbNames[i]}:a{_avatarAngles[i] * Mathf.Rad2Deg:F0}/t{target[i] * Mathf.Rad2Deg:F0}/e{errDeg:F0}");
             }
             Debug.Log(sb.ToString());
+        }
+
+        // ---- Bottom-strip pose-improvement hint ("Move left arm up"). ----
+        // Created at runtime so we never hand-edit the HUD prefab/scene. Lives at the bottom-
+        // centre of the HUD panel. SemiBold, dark fill + light outline, centred (Figma
+        // MegaDancePlaying), kept SIMPLE: the literal limb directive the scorer derives.
+        void EnsureHintText()
+        {
+            if (_hintText != null || hudPanel == null) return;
+
+            var go = new GameObject("PoseHint", typeof(RectTransform));
+            var rt = go.GetComponent<RectTransform>();
+            rt.SetParent(hudPanel.GetComponent<RectTransform>(), false);
+            rt.anchorMin = new Vector2(0.05f, 0.02f);
+            rt.anchorMax = new Vector2(0.95f, 0.12f);
+            rt.offsetMin = Vector2.zero;
+            rt.offsetMax = Vector2.zero;
+
+            _hintText = go.AddComponent<TextMeshProUGUI>();
+            _hintText.alignment = TextAlignmentOptions.Center;
+            _hintText.enableAutoSizing = true;
+            _hintText.fontSizeMin = 24f;
+            _hintText.fontSizeMax = 48f; // Figma: ~48px
+            _hintText.fontStyle = FontStyles.Bold;
+            _hintText.color = new Color(0.10f, 0.12f, 0.16f); // dark fill
+            _hintText.raycastTarget = false;
+            // Light outline (~6px feel) via the label's own material instance.
+            var mat = _hintText.fontMaterial;
+            if (mat != null)
+            {
+                if (mat.HasProperty(ShaderUtilities.ID_OutlineColor))
+                    mat.SetColor(ShaderUtilities.ID_OutlineColor, new Color(1f, 1f, 1f, 0.9f));
+                if (mat.HasProperty(ShaderUtilities.ID_OutlineWidth))
+                    mat.SetFloat(ShaderUtilities.ID_OutlineWidth, 0.2f);
+            }
+            _hintText.text = "";
+        }
+
+        // Refresh the hint ~2x/sec from the worst-error limb. Only meaningful with live keypoints
+        // (the keyboard stub has no pose), so it stays blank in stub mode.
+        void UpdateHint()
+        {
+            if (_hintText == null) return;
+            if (Time.time - _lastHintAt < 0.35f) return;
+            _lastHintAt = Time.time;
+
+            if (useKeyboardStub || poseDetector == null || !poseDetector.HasPose ||
+                _signatures == null)
+            {
+                _hintText.text = "";
+                return;
+            }
+
+            // In the green zone, stop coaching and shout "hold it" so hitting 70% is unmistakable.
+            if (_smoothedScore >= passThreshold)
+            {
+                _hintText.text = "GREAT — HOLD IT!";
+                return;
+            }
+
+            float[] target = _signatures[trainer.CurrentPose];
+            // _avatarAngles was baked this frame in ReadScore. mirrorLR=true flips the named side so
+            // the coaching matches the limb the USER must move (the avatar mirrors them).
+            // ~12° deadzone so we don't nag on near-correct limbs.
+            _hintText.text = PoseHint.Compute(_avatarAngles, target, null, 12f * Mathf.Deg2Rad, mirrorLR: true);
+
+            // Read the line aloud. VoiceCoach only actually speaks when the line changed,
+            // nothing is playing, and its min-gap elapsed — so calling every refresh is fine.
+            if (voice != null) voice.Speak(_hintText.text);
         }
 
         IEnumerator CorrectSequence()
         {
             _state = State.Correct; // set synchronously so Update() can't re-trigger this frame
+
+            // Combo: passing a pose quickly (within comboWindowSeconds of it starting) builds the
+            // combo and raises the success-chime pitch; a slow pass resets it to 1.
+            bool fast = (Time.time - _poseStartTime) <= comboWindowSeconds;
+            _combo = fast ? _combo + 1 : 1;
+            float pitch = 1f + 0.05f * Mathf.Min(_combo - 1, 6); // cap the rise so it never gets shrill
+            Kinex.Sfx.Play("correct", 1f, pitch); // success chime, higher with each combo
+
             SetPanels(instruction: false, hud: false, correct: true, results: false, start: false);
-            if (correctPoseNameText != null) correctPoseNameText.text = $"Pose {trainer.CurrentPose + 1}";
+            // Figma MegaDanceCorrect: italic gradient text + white stroke + shadow over a dimmed
+            // backdrop, popping in. Styled + animated at runtime (no prefab edits).
+            CorrectEffect.Style(correctOverlay, out var correctRt, out var correctGroup);
+            StartCoroutine(CorrectEffect.Pop(correctRt, correctGroup));
+            if (correctPoseNameText != null)
+                correctPoseNameText.text = _combo >= 2
+                    ? $"Pose {trainer.CurrentPose + 1}   •   Combo x{_combo}!"
+                    : $"Pose {trainer.CurrentPose + 1}";
             if (matchBarFill != null) matchBarFill.fillAmount = 1f;
             if (percentText != null)  percentText.text = "100%";
+            Kinex.ScoreHud.Apply(percentText, matchBarFill, 1f); // pass = green
             yield return new WaitForSeconds(correctHoldSeconds);
 
             int next = trainer.CurrentPose + 1;
@@ -284,6 +408,7 @@ namespace Kinex.MegaDance
         void ShowResults()
         {
             _state = State.Results;
+            Kinex.Sfx.Play("results"); // session-complete sting
             SetPanels(instruction: false, hud: false, correct: false, results: true, start: false);
             if (debugNextButton != null) debugNextButton.SetActive(false); // game over — hide skip
             Debug.Log("[MegaDanceManager] All poses complete!");
