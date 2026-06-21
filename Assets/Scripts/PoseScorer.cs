@@ -98,6 +98,22 @@ namespace Kinex.MegaDance
         }
 
         /// <summary>
+        /// Score two angle signatures against each other (radians). Used to compare the driven
+        /// AVATAR rig's baked angles to the trainer's baked target — both come from the same
+        /// PoseSignatureBaker, so they live in one space and no camera mirror is involved.
+        /// Returns 0..1 = average over the 8 limbs of max(0, 1 - error/tolerance).
+        /// </summary>
+        public static float ScoreAngles(float[] player, float[] target, float toleranceRad)
+        {
+            if (player == null || target == null ||
+                player.Length < NumLimbs || target.Length < NumLimbs || toleranceRad <= 0f) return 0f;
+            float sum = 0f;
+            for (int i = 0; i < NumLimbs; i++)
+                sum += Mathf.Max(0f, 1f - AngleError(player[i], target[i]) / toleranceRad);
+            return sum / NumLimbs;
+        }
+
+        /// <summary>
         /// Score player keypoints against an 8-angle target signature (radians).
         /// Returns 0..1 = average over confident limbs of max(0, 1 - error/tolerance).
         /// Limbs whose keypoints fall below confidence are skipped (not penalised).

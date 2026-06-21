@@ -1,0 +1,7 @@
+{
+    "activeProfileIndex": -1,
+    "offlineRecognizerPoolSize": 1,
+    "keepOnlyActiveProfile": false,
+    "buildOnlyActiveProfile": false,
+    "profiles": []
+}

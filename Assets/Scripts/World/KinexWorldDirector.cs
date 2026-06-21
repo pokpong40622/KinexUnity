@@ -35,8 +35,10 @@ namespace Kinex.World
         public MediaPipePoseDetector poseDetector;
 
         [Header("Scoring")]
-        [Tooltip("Skip the camera and feed a random score — lets the full timeline run in-editor.")]
-        public bool useScoreStub = true;
+        [Tooltip("Skip the camera and feed a random score — lets the full timeline run in-editor. " +
+                 "OFF by default so scoring routes through the real PoseScorer vs the live trainer pose " +
+                 "(the random stub made every pose read 70-80%). Turn ON only for camera-free editor walkthroughs.")]
+        public bool useScoreStub = false;
         [Range(10f, 70f)] public float toleranceDegrees = 45f;
         [Range(0f, 1f)] public float minConfidence = 0.3f;
         [Tooltip("Seconds between score samples during an exercise.")]
@@ -245,6 +247,7 @@ namespace Kinex.World
         {
             Current = State.Active;
             ShowOnly(hudPanel);
+            Kinex.ScoreHud.EnsurePassLine(liveBarFill); // 70% target marker on the live bar (idempotent)
             PlayClip(ex);
 
             // Unity HUD uses the Latin (Montserrat) TMP fonts — show English here; the polished
@@ -338,6 +341,7 @@ namespace Kinex.World
         {
             if (liveBarFill) liveBarFill.fillAmount = LiveScore01;
             if (percentText) percentText.text = $"{Mathf.RoundToInt(LiveScore01 * 100f)}%";
+            Kinex.ScoreHud.Apply(percentText, liveBarFill, LiveScore01); // colour by band (<50 red, <70 yellow, >=70 green)
             if (encourageText)
                 encourageText.text = LiveScore01 >= 0.75f ? "Great!" :
                                      LiveScore01 >= 0.5f ? "Nice!" : "Keep going!";

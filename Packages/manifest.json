@@ -1,5 +1,17 @@
 {
+  "scopedRegistries": [
+    {
+      "name": "OpenUPM",
+      "url": "https://package.openupm.com",
+      "scopes": [
+        "com.ponyudev.sherpa-onnx",
+        "com.cysharp.unitask"
+      ]
+    }
+  ],
   "dependencies": {
+    "com.ponyudev.sherpa-onnx": "0.2.0",
+    "com.cysharp.unitask": "2.5.10",
     "com.coplaydev.unity-mcp": "https://github.com/CoplayDev/unity-mcp.git?path=/MCPForUnity#main",
     "com.learntoflutter.flutter_embed_unity_6000_0": "https://github.com/learntoflutter/flutter_embed_unity.git?path=example_unity_6000_0_project/Assets/FlutterEmbed",
     "com.github.homuler.mediapipe": "file:../LocalPackages/com.github.homuler.mediapipe-0.16.3.tgz",

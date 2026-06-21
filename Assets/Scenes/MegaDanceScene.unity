@@ -2161,11 +2161,15 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Kinex.MegaDance.MegaDanceManager
   trainer: {fileID: 1540634195}
+  voice: {fileID: 1409684465}
   useKeyboardStub: 0
   poseDetector: {fileID: 1175806256}
   passThreshold: 0.7
   toleranceDegrees: 45
   minConfidence: 0.3
+  scoreSmoothing: 0.25
+  holdToPassSeconds: 0.4
+  scoreDebugLog: 1
   firstPoseCountdown: 3
   correctHoldSeconds: 1.2
   startPanel: {fileID: 1494384671}
@@ -3465,6 +3469,9 @@ MonoBehaviour:
   depthStrength: 0
   armsOnly: 0
   followStrength: 1
+  legSensitivity: 0.55
+  hipSway: 1
+  hipSwayScale: 2.5
   restReturnDegPerSec: 300
   debugLog: 1
   autoCalibrate: 0
@@ -4051,6 +4058,67 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1407402803}
   m_CullTransparentMesh: 1
+--- !u!1 &1409684464
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1409684467}
+  - component: {fileID: 1409684466}
+  - component: {fileID: 1409684465}
+  m_Layer: 0
+  m_Name: VoiceCoach
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1409684465
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1409684464}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f66347a50db6c3348b0fbbccc833852b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Kinex.MegaDance.VoiceCoach
+  tts: {fileID: 1409684466}
+  minGapSeconds: 2
+--- !u!114 &1409684466
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1409684464}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ed77b0ce0366c4f7e983fc51e41ba2b5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: PonyuDev.SherpaOnnx::PonyuDev.SherpaOnnx.Tts.TtsOrchestrator
+  _initializeOnAwake: 1
+  _defaultPlaybackMode: 0
+--- !u!4 &1409684467
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1409684464}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1455777891
 GameObject:
   m_ObjectHideFlags: 0
@@ -6826,6 +6894,7 @@ MonoBehaviour:
   lineColor: {r: 0, g: 1, b: 0.8, a: 0.85}
   jointColor: {r: 1, g: 0, b: 0.8, a: 1}
   headColor: {r: 1, g: 0.85, b: 0.2, a: 1}
+  previewRotateCW: 90
 --- !u!222 &2129745070
 CanvasRenderer:
   m_ObjectHideFlags: 0
@@ -7369,3 +7438,4 @@ SceneRoots:
   - {fileID: 805636818}
   - {fileID: 1540634193}
   - {fileID: 827990174}
+  - {fileID: 1409684467}

@@ -18,9 +18,16 @@ namespace Kinex.MegaDance
     public class PoseSignatureBaker
     {
         // ⚠️ TUNING KNOB. Webcam keypoints are normally mirrored (selfie view); a person
-        // facing the camera has their physical-right on the viewer's left. Flip if the
-        // baked target ends up left/right-swapped vs the live player.
-        public bool mirrorX = true;
+        // facing the camera has their physical-right on the viewer's left.
+        // 2026-06-20: mirrorX=false fixed the gross arm-angle error, but the player still has to
+        // copy the OPPOSITE arm to score — i.e. a pure left/right LABEL swap remained. swapLeftRight
+        // exchanges the baked target's left/right limb slots (arms+legs) so a true mirror copy scores.
+        public bool mirrorX = false;
+
+        // Left/right limb swap. NO LONGER NEEDED for the rig-vs-rig scoring path (the avatar rig is
+        // baked the same way as the trainer rig, so a true copy already lines up). Kept as a knob in
+        // case the avatar and trainer rigs are ever authored facing opposite ways.
+        public bool swapLeftRight = false;
 
         // Humanoid bone whose world position best matches each COCO keypoint (indices 5-16).
         // The rig's joint pivots sit at the limb roots, which is what we want for limb angles.
@@ -44,7 +51,14 @@ namespace Kinex.MegaDance
         public float[] BakeFromRig(Animator animator)
         {
             var angles = new float[PoseScorer.NumLimbs];
-            if (animator == null) return angles;
+            BakeFromRigInto(animator, angles);
+            return angles;
+        }
+
+        /// <summary>No-alloc version for per-frame scoring: fills <paramref name="angles"/> (length 8).</summary>
+        public void BakeFromRigInto(Animator animator, float[] angles)
+        {
+            if (animator == null || angles == null) return;
 
             foreach (var (coco, bone) in JointMap)
             {
@@ -54,8 +68,17 @@ namespace Kinex.MegaDance
             // conf=null → every joint counts; ComputeAngles guarantees identical math
             // to the player-side scoring path.
             PoseScorer.ComputeAngles(_kp, null, 0f, angles, _valid);
-            return angles;
+            if (swapLeftRight)
+            {
+                // Limb order: L/R upper arm, L/R forearm, L/R upper leg, L/R shin.
+                Swap(angles, 0, 1);
+                Swap(angles, 2, 3);
+                Swap(angles, 4, 5);
+                Swap(angles, 6, 7);
+            }
         }
+
+        static void Swap(float[] a, int i, int j) { (a[i], a[j]) = (a[j], a[i]); }
 
         /// <summary>
         /// World position → frontal image-plane point. Trainer faces -Z, so a frontal

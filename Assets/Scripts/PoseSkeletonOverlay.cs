@@ -31,6 +31,11 @@ public class PoseSkeletonOverlay : Graphic
     // preview box). 90 is the 180°-opposite quarter turn that lands it upright. (See Round 11 fix.)
     [SerializeField] int previewRotateCW = 90;
 
+    [Tooltip("Mirror the skeleton horizontally so it lands on the selfie-mirrored body and matches " +
+             "the 3D avatar (raise right → skeleton's hand up on the same side as the avatar). " +
+             "Android only; flip if the skeleton ends up on the wrong side.")]
+    [SerializeField] bool mirrorSkeletonX = true;
+
     // COCO-17 indices — must match MediaPipePoseDetector's MP_TO_COCO mapping.
     const int NOSE = 0, L_SH = 5, R_SH = 6, L_EL = 7, R_EL = 8, L_WR = 9, R_WR = 10,
               L_HIP = 11, R_HIP = 12, L_KN = 13, R_KN = 14, L_AN = 15, R_AN = 16;
@@ -81,6 +86,9 @@ public class PoseSkeletonOverlay : Graphic
             Vector2 p = kp[i];
             float u = (p.x - off.x) / Mathf.Max(scl.x, 1e-4f);
             float v = (p.y - off.y) / Mathf.Max(scl.y, 1e-4f);
+#if UNITY_ANDROID && !UNITY_EDITOR
+            if (mirrorSkeletonX) u = 1f - u; // selfie mirror so the skeleton matches the avatar/body
+#endif
             if (rot == 0)
                 return new Vector2(r.xMin + u * r.width, r.yMin + v * r.height);
 
