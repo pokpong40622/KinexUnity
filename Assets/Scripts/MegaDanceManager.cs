@@ -198,6 +198,12 @@ namespace Kinex.MegaDance
         IEnumerator FirstPoseRoutine()
         {
             _state = State.FirstPose;
+            // Disable word-wrap on countdown so "GO!" stays on one line.
+            if (countdownText != null)
+            {
+                countdownText.enableWordWrapping = false;
+                countdownText.overflowMode = TextOverflowModes.Overflow;
+            }
             // Arcade-style get-ready: a beep on each 3-2-1 tick, then a bright "GO!" (sounds
             // only — no spoken "three two one", which the user found annoying).
             for (int t = firstPoseCountdown; t > 0; t--)
@@ -380,10 +386,13 @@ namespace Kinex.MegaDance
             // backdrop, popping in. Styled + animated at runtime (no prefab edits).
             CorrectEffect.Style(correctOverlay, out var correctRt, out var correctGroup);
             StartCoroutine(CorrectEffect.Pop(correctRt, correctGroup));
+            // Show only "Correct!" — no combo text on screen (combo logic still runs for chime pitch).
             if (correctPoseNameText != null)
-                correctPoseNameText.text = _combo >= 2
-                    ? $"Pose {trainer.CurrentPose + 1}   •   Combo x{_combo}!"
-                    : $"Pose {trainer.CurrentPose + 1}";
+            {
+                correctPoseNameText.text = "Correct!";
+                correctPoseNameText.enableWordWrapping = false;
+                correctPoseNameText.overflowMode = TextOverflowModes.Overflow;
+            }
             if (matchBarFill != null) matchBarFill.fillAmount = 1f;
             if (percentText != null)  percentText.text = "100%";
             Kinex.ScoreHud.Apply(percentText, matchBarFill, 1f); // pass = green
@@ -411,6 +420,27 @@ namespace Kinex.MegaDance
             Kinex.Sfx.Play("results"); // session-complete sting
             SetPanels(instruction: false, hud: false, correct: false, results: true, start: false);
             if (debugNextButton != null) debugNextButton.SetActive(false); // game over — hide skip
+
+            // Disable word-wrap on any text inside the results panel so nothing wraps ugly.
+            if (resultsPanel != null)
+            {
+                foreach (var t in resultsPanel.GetComponentsInChildren<TMP_Text>(true))
+                {
+                    t.enableWordWrapping = false;
+                    t.overflowMode = TextOverflowModes.Overflow;
+                }
+
+                // Wire the results panel button to go Home instead of restarting.
+                var btn = resultsPanel.GetComponentInChildren<Button>(true);
+                if (btn != null)
+                {
+                    btn.onClick.RemoveAllListeners();
+                    btn.onClick.AddListener(ExitToHome);
+                    var btnLabel = btn.GetComponentInChildren<TMP_Text>(true);
+                    if (btnLabel != null) btnLabel.text = "Home";
+                }
+            }
+
             Debug.Log("[MegaDanceManager] All poses complete!");
         }
 

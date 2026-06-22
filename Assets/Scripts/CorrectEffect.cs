@@ -31,9 +31,14 @@ namespace Kinex.MegaDance
 
             // Big italic Montserrat-ish look (uses whatever TMP font is already assigned).
             tmp.fontStyle = FontStyles.Italic | FontStyles.Bold;
-            tmp.enableAutoSizing = false;
-            if (tmp.fontSize < 120f) tmp.fontSize = 160f;
+            // Auto-size so "Correct!" always fits on one line regardless of panel width.
+            tmp.enableAutoSizing = true;
+            tmp.fontSizeMin = 60f;
+            tmp.fontSizeMax = 160f;
             tmp.alignment = TextAlignmentOptions.Center;
+            // Never wrap — the text must stay on one line.
+            tmp.enableWordWrapping = false;
+            tmp.overflowMode = TextOverflowModes.Overflow;
 
             // Gradient fill (white→light green, top→bottom).
             tmp.enableVertexGradient = true;

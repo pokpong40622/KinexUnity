@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using Kinex.MegaDance; // PoseScorer + PoseSignatureBaker (reused unchanged)
+using Kinex.Trainer;
 
 namespace Kinex.World
 {
@@ -14,9 +15,9 @@ namespace Kinex.World
     /// matches the trainer's LIVE animated pose. The mean of those samples is the
     /// Average Performance Percentage.
     ///
-    /// Scoring reuses PoseScorer.Score against a target baked every tick from the trainer's
-    /// current rig pose (PoseSignatureBaker.BakeFromRig) — so a continuously-animating
-    /// trainer feeds scoring for free, with no pre-baked static targets.
+    /// Scoring uses rig-vs-rig: bake the driven AVATAR rig and score it against the trainer
+    /// rig (PoseSignatureBaker.BakeFromRig / BakeFromRigInto) — the same approach MegaDance
+    /// uses, so the score rewards making the avatar look like the trainer.
     ///
     /// Phase 0: runs headless with useScoreStub=true (random score, no camera) so the whole
     /// timeline is walkable in the editor before any animation or webcam exists.
@@ -31,13 +32,15 @@ namespace Kinex.World
         [Header("Scene refs")]
         [Tooltip("Animator on the trainer rig that plays the per-exercise looping clips.")]
         public Animator trainerAnimator;
+        [Tooltip("Drives the trainer rig through baked balance poses (one per exercise). When set, the director controls progression instead of letting the controller auto-cycle.")]
+        public TrainerPoseController trainer;
         [Tooltip("Player pose source. Optional while useScoreStub is on.")]
         public MediaPipePoseDetector poseDetector;
 
         [Header("Scoring")]
         [Tooltip("Skip the camera and feed a random score — lets the full timeline run in-editor. " +
-                 "OFF by default so scoring routes through the real PoseScorer vs the live trainer pose " +
-                 "(the random stub made every pose read 70-80%). Turn ON only for camera-free editor walkthroughs.")]
+                 "OFF by default so scoring routes through the real rig-vs-rig PoseScorer. " +
+                 "Turn ON only for camera-free editor walkthroughs.")]
         public bool useScoreStub = false;
         [Range(10f, 70f)] public float toleranceDegrees = 45f;
         [Range(0f, 1f)] public float minConfidence = 0.3f;
@@ -49,10 +52,11 @@ namespace Kinex.World
         [Header("Timing")]
         [Range(1, 5)] public int countdownSeconds = 3;
         [Tooltip("Pause on the transition card between exercises.")]
-        [Range(0f, 4f)] public float transitionSeconds = 2f;
-        [Tooltip("Auto-begin after the intro card (Flutter/UI may call BeginAfterIntro instead).")]
+        [Range(0f, 4f)] public float transitionSeconds = 3f;   // was 2 — slightly longer pause so player knows what's next
+        [Tooltip("Auto-begin after the intro card (Flutter/UI may call BeginAfterIntro instead). " +
+                 "Unused: the play flow skips the intro card entirely.")]
         public bool autoBeginIntro = true;
-        [Range(0f, 6f)] public float introSeconds = 3f;
+        [Range(0f, 6f)] public float introSeconds = 3f;        // kept for CalibrateThenMenu path, not used in RunSession
 
         [Header("UI — Intro / countdown")]
         public GameObject introPanel;
@@ -100,8 +104,14 @@ namespace Kinex.World
         public WorldSessionResult LastResult { get; private set; }
 
         readonly PoseSignatureBaker _baker = new PoseSignatureBaker();
+        readonly float[] _avatarAngles = new float[PoseScorer.NumLimbs]; // Task A: rig-vs-rig scratch buffer
         Coroutine _run;
         float _stubBias = 0.78f; // centre of the random stub band
+
+        // Task C: Correct popup runtime state
+        bool _correctCued;                   // true once the "Correct!" popup has fired this segment
+        GameObject _correctPopupGo;          // the runtime full-screen canvas overlay
+        TMP_Text _correctPopupText;          // the "Correct!" TMP label inside it
 
         float ToleranceRad => toleranceDegrees * Mathf.Deg2Rad;
 
@@ -137,16 +147,14 @@ namespace Kinex.World
             CurrentIndex = -1;
             LiveScore01 = 0f;
 
-            // Intro card
-            Current = State.Intro;
-            ShowOnly(introPanel);
+            // Task B: Skip the Unity intro card entirely — go straight into the first exercise
+            // so the trainer animation begins as soon as Flutter's Start tap arrives.
+            // StartMusic and routineNameText are still set here; the intro panel is never shown.
             StartMusic();
             if (routineNameText) routineNameText.text = routine.englishName;
-            if (autoBeginIntro) yield return new WaitForSeconds(introSeconds);
+            // (introPanel intentionally NOT shown, introSeconds wait intentionally skipped)
 
-            // Calibration removed — the class starts straight from the intro into the first
-            // exercise. (The avatar is driven directly from live 2D landmarks, no per-user
-            // T-pose capture needed.)
+            if (trainer != null) { trainer.autoAdvance = false; trainer.blendTime = 0.7f; }
 
             float totalDuration = 0f;
             float weightedScoreSum = 0f;
@@ -156,6 +164,8 @@ namespace Kinex.World
                 var ex = routine.exercises[i];
                 if (ex == null) continue;
                 CurrentIndex = i;
+
+                if (trainer != null) trainer.ShowPose(i); // exercise i ↔ trainer pose i (ShowPose wraps, so safe)
 
                 yield return Countdown(ex);
 
@@ -200,7 +210,7 @@ namespace Kinex.World
         {
             yield return Calibrate();
             Current = State.Idle;
-            ShowOnly(introPanel);
+            ShowOnly(introPanel); // CalibrateThenMenu path: show intro as a "ready" landing screen
         }
 
         IEnumerator Calibrate()
@@ -212,9 +222,6 @@ namespace Kinex.World
 
             poseDetector.StartCalibration();
 
-            // The detector's routine sets Prompting synchronously, then drives
-            // Prompting → Counting → Done → Idle. In the editor (no webcam) StartCalibration is a
-            // no-op so the phase stays Idle and we fall straight through — no hang.
             while (poseDetector.CalibrationPhase != MediaPipePoseDetector.CalibState.Idle)
             {
                 var phase = poseDetector.CalibrationPhase;
@@ -250,8 +257,6 @@ namespace Kinex.World
             Kinex.ScoreHud.EnsurePassLine(liveBarFill); // 70% target marker on the live bar (idempotent)
             PlayClip(ex);
 
-            // Unity HUD uses the Latin (Montserrat) TMP fonts — show English here; the polished
-            // Thai copy lives in the Flutter shell.
             if (exerciseNameText) exerciseNameText.text =
                 string.IsNullOrEmpty(ex.englishName) ? ex.id : ex.englishName;
             if (exerciseCounterText) exerciseCounterText.text = $"{index + 1}/{routine.ExerciseCount}";
@@ -262,6 +267,9 @@ namespace Kinex.World
             float elapsed = 0f, tick = 0f, acc = 0f;
             int samples = 0;
             LiveScore01 = 0f;
+
+            // Task C: reset the "Correct!" debounce flag at the start of each segment
+            _correctCued = false;
 
             while (elapsed < ex.durationSeconds)
             {
@@ -274,6 +282,13 @@ namespace Kinex.World
                     acc += s; samples++;
                     LiveScore01 = Mathf.Lerp(s, LiveScore01, liveBarSmoothing);
                     UpdateLiveHud();
+
+                    // Task C: fire "Correct!" overlay once per segment when score first crosses 70%
+                    if (!_correctCued && LiveScore01 >= Kinex.ScoreHud.PassThreshold)
+                    {
+                        _correctCued = true;
+                        StartCoroutine(ShowCorrectPopup());
+                    }
                 }
                 if (segmentTimerFill) segmentTimerFill.fillAmount = elapsed / ex.durationSeconds;
                 yield return null;
@@ -293,6 +308,7 @@ namespace Kinex.World
 
         // ---------------------------------------------------------------- scoring
 
+        // Task A: rig-vs-rig scoring — matches MegaDanceManager.ReadScore exactly in spirit.
         float SampleScore()
         {
             if (useScoreStub)
@@ -302,12 +318,94 @@ namespace Kinex.World
                 return Mathf.Clamp01(_stubBias + UnityEngine.Random.Range(-0.15f, 0.15f));
             }
 
-            if (poseDetector == null || !poseDetector.HasPose || trainerAnimator == null)
+            // Rig-vs-rig: score the driven avatar rig against the live trainer rig.
+            // Both are baked the same way (PoseSignatureBaker), so no left/right ambiguity.
+            if (poseDetector == null || !poseDetector.HasPose || trainerAnimator == null
+                || poseDetector.AvatarAnimator == null)
                 return 0f;
 
             float[] target = _baker.BakeFromRig(trainerAnimator);
-            return PoseScorer.Score(poseDetector.LatestKeypoints, poseDetector.LatestConfidence,
-                                    target, minConfidence, ToleranceRad);
+            _baker.BakeFromRigInto(poseDetector.AvatarAnimator, _avatarAngles);
+            return PoseScorer.ScoreAngles(_avatarAngles, target, ToleranceRad);
+        }
+
+        // ---------------------------------------------------------------- correct popup (Task C)
+
+        // Show a brief self-contained "Correct!" overlay that fades out after ~0.6 s.
+        // Built once at runtime (full-screen Canvas child) and reused each time.
+        IEnumerator ShowCorrectPopup()
+        {
+            EnsureCorrectPopup();
+            if (_correctPopupGo == null) yield break;
+
+            _correctPopupGo.SetActive(true);
+            if (_correctPopupText != null) _correctPopupText.text = "Correct!";
+
+            // Style + pop via the shared CorrectEffect (null-safe: only if there's a TMP child)
+            var tmp = _correctPopupGo.GetComponentInChildren<TMP_Text>(true);
+            if (tmp != null)
+            {
+                CorrectEffect.Style(_correctPopupGo, out var rt, out var grp);
+                yield return StartCoroutine(CorrectEffect.Pop(rt, grp, 0.25f)); // 0.25 s pop-in
+                yield return new WaitForSeconds(0.6f);                          // hold visible
+
+                // Fade out over 0.25 s
+                if (grp != null)
+                {
+                    float t = 0f;
+                    while (t < 0.25f)
+                    {
+                        t += Time.deltaTime;
+                        grp.alpha = Mathf.Lerp(1f, 0f, t / 0.25f);
+                        yield return null;
+                    }
+                }
+            }
+            else
+            {
+                // Fallback: no TMP child — just show briefly
+                yield return new WaitForSeconds(0.8f);
+            }
+
+            if (_correctPopupGo != null) _correctPopupGo.SetActive(false);
+        }
+
+        // Build the correct-popup overlay once: a full-screen Canvas child with a TMP label.
+        void EnsureCorrectPopup()
+        {
+            if (_correctPopupGo != null) return;
+
+            // Find the first Canvas in the scene to parent under
+            var canvas = FindObjectOfType<Canvas>();
+            if (canvas == null) return;
+
+            var go = new GameObject("WorldCorrectOverlay", typeof(RectTransform));
+            var rt = go.GetComponent<RectTransform>();
+            rt.SetParent(canvas.transform, false);
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.offsetMin = Vector2.zero;
+            rt.offsetMax = Vector2.zero;
+
+            // TMP label
+            var textGo = new GameObject("CorrectText", typeof(RectTransform));
+            var textRt = textGo.GetComponent<RectTransform>();
+            textRt.SetParent(rt, false);
+            textRt.anchorMin = new Vector2(0.1f, 0.35f);
+            textRt.anchorMax = new Vector2(0.9f, 0.65f);
+            textRt.offsetMin = Vector2.zero;
+            textRt.offsetMax = Vector2.zero;
+
+            _correctPopupText = textGo.AddComponent<TextMeshProUGUI>();
+            _correctPopupText.text = "Correct!";
+            _correctPopupText.alignment = TextAlignmentOptions.Center;
+            _correctPopupText.fontSize = 160f;
+            _correctPopupText.fontStyle = FontStyles.Bold | FontStyles.Italic;
+            _correctPopupText.color = Color.white;
+            _correctPopupText.raycastTarget = false;
+
+            _correctPopupGo = go;
+            go.SetActive(false);
         }
 
         // ---------------------------------------------------------------- helpers
@@ -328,12 +426,13 @@ namespace Kinex.World
             musicSource.Stop();
         }
 
+        // Task C+D: trainer playback speed reduced to 0.75x so held poses are easier to follow.
+        // This slows down the trainer animation globally (countdown + active segment), giving the
+        // player more time to read and copy each held position.
         void PlayClip(ExerciseDefinition ex)
         {
-            // If an exercise AnimationClip is authored, CrossFade to it (Animator state named
-            // after the clip). Otherwise the trainer is animated by TrainerPoseController
-            // (continuous baked-pose demonstration) independently of the director.
             if (trainerAnimator == null || ex == null || ex.clip == null) return;
+            trainerAnimator.speed = 0.75f; // Task D: ~25% slower than real-time — easier to follow
             trainerAnimator.CrossFade(ex.clip.name, 0.25f);
         }
 

@@ -3767,8 +3767,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9fb542a082b17c747baa17864892cfd2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Kinex.World.KinexWorldDirector
-  routine: {fileID: 11400000, guid: f230ac243775c6046bf14cb783816fbd, type: 2}
+  routine: {fileID: 11400000, guid: 71090d9bad3db65499c3230c8b59176c, type: 2}
   trainerAnimator: {fileID: 1540634196}
+  trainer: {fileID: 1540634195}
   poseDetector: {fileID: 1175806256}
   useScoreStub: 0
   toleranceDegrees: 45
@@ -6577,7 +6578,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 95684611405597587, guid: d11c3dfa0bc6b26438ee0ac97c8f924a, type: 3}
       propertyPath: m_LocalRotation.w
-      value: -0.0014591817
+      value: -0.0014591821
       objectReference: {fileID: 0}
     - target: {fileID: 95684611405597587, guid: d11c3dfa0bc6b26438ee0ac97c8f924a, type: 3}
       propertyPath: m_LocalRotation.x
@@ -6585,7 +6586,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 95684611405597587, guid: d11c3dfa0bc6b26438ee0ac97c8f924a, type: 3}
       propertyPath: m_LocalRotation.y
-      value: 0.0077799764
+      value: 0.007779978
       objectReference: {fileID: 0}
     - target: {fileID: 95684611405597587, guid: d11c3dfa0bc6b26438ee0ac97c8f924a, type: 3}
       propertyPath: m_LocalRotation.z
@@ -6992,7 +6993,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9946b761849e5834aad2f3c36e4c4d17, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Kinex.Trainer.TrainerPoseController
-  poseData: {fileID: 11400000, guid: 12e57332f926b624382e58fdd8aa8b2b, type: 2}
+  poseData: {fileID: 11400000, guid: e119b94004769544a9d2602cc0591ae9, type: 2}
   rigRoot: {fileID: 0}
   blendTime: 0.9
   poseHoldTime: 1.6
@@ -8517,6 +8518,7 @@ MonoBehaviour:
   jointColor: {r: 1, g: 0, b: 0.8, a: 1}
   headColor: {r: 1, g: 0.85, b: 0.2, a: 1}
   previewRotateCW: 90
+  mirrorSkeletonX: 1
 --- !u!222 &2129745070
 CanvasRenderer:
   m_ObjectHideFlags: 0
