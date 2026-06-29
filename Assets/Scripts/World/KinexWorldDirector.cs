@@ -141,7 +141,7 @@ namespace Kinex.World
             Current = State.Intro;
             ShowOnly(introPanel);
             StartMusic();
-            if (routineNameText) routineNameText.text = routine.englishName;
+            if (routineNameText) routineNameText.text = routine.DisplayName;
             if (autoBeginIntro) yield return new WaitForSeconds(introSeconds);
 
             // Calibration removed — the class starts straight from the intro into the first
@@ -207,7 +207,7 @@ namespace Kinex.World
         {
             Current = State.Calibrating;
             ShowOnly(calibrationPanel);
-            if (calibPromptText) calibPromptText.text = "Stand in a T-pose\narms straight out to the sides";
+            if (calibPromptText) calibPromptText.text = "ยืนท่าตัว T\nกางแขนตรงออกด้านข้าง";
             if (calibCountdownText) calibCountdownText.text = "";
 
             poseDetector.StartCalibration();
@@ -220,9 +220,9 @@ namespace Kinex.World
                 var phase = poseDetector.CalibrationPhase;
                 if (calibPromptText)
                     calibPromptText.text =
-                        phase == MediaPipePoseDetector.CalibState.Counting ? "Hold your T-pose!" :
-                        phase == MediaPipePoseDetector.CalibState.Done     ? "Calibrated!" :
-                                                                             "Stand in a T-pose\narms straight out to the sides";
+                        phase == MediaPipePoseDetector.CalibState.Counting ? "ค้างท่าตัว T ไว้!" :
+                        phase == MediaPipePoseDetector.CalibState.Done     ? "ปรับเทียบเสร็จแล้ว!" :
+                                                                             "ยืนท่าตัว T\nกางแขนตรงออกด้านข้าง";
                 if (calibCountdownText)
                     calibCountdownText.text =
                         phase == MediaPipePoseDetector.CalibState.Counting
@@ -252,12 +252,11 @@ namespace Kinex.World
 
             // Unity HUD uses the Latin (Montserrat) TMP fonts — show English here; the polished
             // Thai copy lives in the Flutter shell.
-            if (exerciseNameText) exerciseNameText.text =
-                string.IsNullOrEmpty(ex.englishName) ? ex.id : ex.englishName;
+            if (exerciseNameText) exerciseNameText.text = ex.DisplayName;
             if (exerciseCounterText) exerciseCounterText.text = $"{index + 1}/{routine.ExerciseCount}";
             if (cameraHint) cameraHint.SetActive(ex.legsRequired);
             if (ex.legsRequired && cameraHintText)
-                cameraHintText.text = "Step back ~2m — full body in view";
+                cameraHintText.text = "ถอยหลังประมาณ 2 เมตร ให้เห็นเต็มตัวนะครับ";
 
             float elapsed = 0f, tick = 0f, acc = 0f;
             int samples = 0;
@@ -287,7 +286,7 @@ namespace Kinex.World
             Current = State.Transition;
             ShowOnly(transitionPanel);
             if (transitionText) transitionText.text =
-                "Next: " + (string.IsNullOrEmpty(next.englishName) ? next.id : next.englishName);
+                "ถัดไป: " + next.DisplayName;
             yield return new WaitForSeconds(transitionSeconds);
         }
 
@@ -343,8 +342,8 @@ namespace Kinex.World
             if (percentText) percentText.text = $"{Mathf.RoundToInt(LiveScore01 * 100f)}%";
             Kinex.ScoreHud.Apply(percentText, liveBarFill, LiveScore01); // colour by band (<50 red, <70 yellow, >=70 green)
             if (encourageText)
-                encourageText.text = LiveScore01 >= 0.75f ? "Great!" :
-                                     LiveScore01 >= 0.5f ? "Nice!" : "Keep going!";
+                encourageText.text = LiveScore01 >= 0.75f ? "เยี่ยม!" :
+                                     LiveScore01 >= 0.5f ? "ดีมาก!" : "สู้ต่อไป!";
         }
 
         /// <summary>Show exactly one panel (or none), hide the rest.</summary>

@@ -131,7 +131,7 @@ namespace Kinex.MegaDance
             if (trainer == null) { Debug.LogError("[MegaDanceManager] trainer not assigned."); return; }
             trainer.autoAdvance = false; // the manager controls progression, not the trainer
             trainer.blendTime = 0.8f;    // ~15% slower pose-to-pose blend so it's easier to follow
-            toleranceDegrees = 55f;      // a bit more forgiving so 70% (and combos) are reachable
+            toleranceDegrees = 45f;      // stricter: user must match the trainer more closely to score
             // Talk more often (default gap is 2s) so coaching feels responsive.
             if (voice != null) voice.minGapSeconds = 0.7f;
             _combo = 0;
@@ -183,7 +183,7 @@ namespace Kinex.MegaDance
         void GoToFirstPose(int index)
         {
             _poseIndex = index;
-            if (poseNameText != null)    poseNameText.text = $"Pose {index + 1}";
+            if (poseNameText != null)    poseNameText.text = $"ท่าที่ {index + 1}";
             if (poseCounterText != null) poseCounterText.text = $"{index + 1}/{trainer.PoseCount}";
             if (poseImage != null)
             {
@@ -200,16 +200,33 @@ namespace Kinex.MegaDance
             _state = State.FirstPose;
             // Arcade-style get-ready: a beep on each 3-2-1 tick, then a bright "GO!" (sounds
             // only — no spoken "three two one", which the user found annoying).
+            // "GO!" is 3 chars wide vs a single digit, so it overran the screen edges — never wrap it
+            // and shrink it to ~55% of the digit size so it fits on one line.
+            float digitSize = 0f;
+            if (countdownText != null)
+            {
+                digitSize = countdownText.fontSize;
+                countdownText.enableWordWrapping = false;
+                countdownText.overflowMode = TextOverflowModes.Overflow;
+            }
             for (int t = firstPoseCountdown; t > 0; t--)
             {
                 if (countdownText != null) countdownText.text = t.ToString();
                 Kinex.Sfx.Play("beep");
                 yield return new WaitForSeconds(1f);
             }
-            if (countdownText != null) countdownText.text = "GO!";
+            if (countdownText != null)
+            {
+                countdownText.fontSize = digitSize * 0.55f; // "GO!" is wider — shrink so it isn't cut off
+                countdownText.text = "ไป!";
+            }
             Kinex.Sfx.Play("go");
             yield return new WaitForSeconds(0.35f);
-            if (countdownText != null) countdownText.text = "";
+            if (countdownText != null)
+            {
+                countdownText.text = "";
+                countdownText.fontSize = digitSize;         // restore for the next round's digits
+            }
             EnterPlaying();
         }
 
@@ -349,7 +366,7 @@ namespace Kinex.MegaDance
             // In the green zone, stop coaching and shout "hold it" so hitting 70% is unmistakable.
             if (_smoothedScore >= passThreshold)
             {
-                _hintText.text = "GREAT — HOLD IT!";
+                _hintText.text = "เยี่ยม! ค้างไว้!";
                 return;
             }
 
@@ -357,7 +374,7 @@ namespace Kinex.MegaDance
             // _avatarAngles was baked this frame in ReadScore. mirrorLR=true flips the named side so
             // the coaching matches the limb the USER must move (the avatar mirrors them).
             // ~12° deadzone so we don't nag on near-correct limbs.
-            _hintText.text = PoseHint.Compute(_avatarAngles, target, null, 12f * Mathf.Deg2Rad, mirrorLR: true);
+            _hintText.text = PoseHint.Compute(_avatarAngles, target, null, 12f * Mathf.Deg2Rad, mirrorLR: false);
 
             // Read the line aloud. VoiceCoach only actually speaks when the line changed,
             // nothing is playing, and its min-gap elapsed — so calling every refresh is fine.
@@ -382,8 +399,8 @@ namespace Kinex.MegaDance
             StartCoroutine(CorrectEffect.Pop(correctRt, correctGroup));
             if (correctPoseNameText != null)
                 correctPoseNameText.text = _combo >= 2
-                    ? $"Pose {trainer.CurrentPose + 1}   •   Combo x{_combo}!"
-                    : $"Pose {trainer.CurrentPose + 1}";
+                    ? $"ท่าที่ {trainer.CurrentPose + 1}   •   คอมโบ x{_combo}!"
+                    : $"ท่าที่ {trainer.CurrentPose + 1}";
             if (matchBarFill != null) matchBarFill.fillAmount = 1f;
             if (percentText != null)  percentText.text = "100%";
             Kinex.ScoreHud.Apply(percentText, matchBarFill, 1f); // pass = green

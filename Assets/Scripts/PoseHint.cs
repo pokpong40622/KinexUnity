@@ -14,8 +14,8 @@ namespace Kinex.MegaDance
     {
         // Per-limb "your left/right arm/leg" — forearm/shin fold into arm/leg so the spoken
         // line stays plain-English ("your right arm") instead of clinical ("right forearm").
-        static readonly string[] Side = { "left", "right", "left", "right",
-                                          "left", "right", "left", "right" };
+        static readonly string[] Side = { "ซ้าย", "ขวา", "ซ้าย", "ขวา",
+                                          "ซ้าย", "ขวา", "ซ้าย", "ขวา" };
         static readonly bool[] IsLeg = { false, false, false, false, true, true, true, true };
 
         /// <summary>
@@ -35,7 +35,7 @@ namespace Kinex.MegaDance
                 float err = PoseScorer.AngleError(playerAngles[i], targetAngles[i]);
                 if (err > worstErr) { worstErr = err; worst = i; }
             }
-            if (worst < 0) return "Nice — hold that pose!"; // everything within the deadzone
+            if (worst < 0) return "ดีมาก ค้างท่าไว้นะครับ!"; // everything within the deadzone
 
             string dir = Direction(playerAngles[worst], targetAngles[worst]);
             // The avatar mirrors the user, so the rig's left/right is the OPPOSITE of the limb the
@@ -56,21 +56,20 @@ namespace Kinex.MegaDance
         // line conveys urgency ("a little" vs "much"/"way").
         static string Sentence(string side, bool isLeg, string dir, float errRad)
         {
-            string limb = isLeg ? "leg" : "arm";
+            string limb = isLeg ? "ขา" : "แขน";
             float errDeg = errRad * Mathf.Rad2Deg;
-            // amount adverb for up/down ("higher"/"much higher"/"a little higher")
-            string amt = errDeg > 70f ? "much " : errDeg < 30f ? "a little " : "";
+            // amount adverb ("much" / "a little" / "")
+            string amt = errDeg > 70f ? "มาก ๆ " : errDeg < 30f ? "อีกนิด " : "";
             switch (dir)
             {
                 case "up":
-                    return isLeg ? $"Lift your {side} {limb} {amt}higher"
-                                 : $"Raise your {side} {limb} {amt}higher";
+                    return $"ยก{limb}{side}ขึ้น{amt}นะครับ";
                 case "down":
-                    return errDeg > 70f ? $"Drop your {side} {limb} down lower"
-                                        : $"Lower your {side} {limb}";
-                default: // "left" / "right"
-                    return errDeg > 70f ? $"Swing your {side} {limb} to the {dir}"
-                                        : $"Move your {side} {limb} to the {dir}";
+                    return $"ลด{limb}{side}ลง{amt}นะครับ";
+                case "left":
+                    return $"ขยับ{limb}{side}ไปทางซ้าย{amt}นะครับ";
+                default: // "right"
+                    return $"ขยับ{limb}{side}ไปทางขวา{amt}นะครับ";
             }
         }
 

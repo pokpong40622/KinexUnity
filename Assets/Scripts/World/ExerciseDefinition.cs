@@ -17,6 +17,11 @@ namespace Kinex.World
         public string thaiName;
         public string englishName;
 
+        /// <summary>Name to show the user — Thai first, else English, else the id.</summary>
+        public string DisplayName =>
+            !string.IsNullOrEmpty(thaiName) ? thaiName
+            : (!string.IsNullOrEmpty(englishName) ? englishName : id);
+
         public ExerciseCategory category;
 
         [Tooltip("Looping trainer animation clip for this exercise. May be null in early phases.")]

@@ -102,6 +102,23 @@ public class MediaPipePoseDetector : MonoBehaviour
     [Tooltip("How far the hips translate horizontally (avatar local units). Higher = bigger sway. " +
              "0.5 was imperceptible on device — bumped to 2.5; tune live if it's now too much/little.")]
     [SerializeField] float hipSwayScale = 2.5f;
+    [Header("Body Turn (yaw) — rotate the WHOLE body when you turn left/right")]
+    [Tooltip("Turn the avatar's body to match you turning sideways. Derived from the two shoulders' " +
+             "angle in the horizontal plane (asin of their depth gap). Heavily smoothed. One toggle " +
+             "to disable if it ever flickers.")]
+    [SerializeField] bool bodyTurn = true;
+    [Tooltip("Amplify the detected turn. The front-cam depth tends to under-read the real turn, so >1.")]
+    [SerializeField] float bodyTurnGain = 1.4f;
+    [Tooltip("Clamp the turn so a bad frame can't spin the body past this many degrees.")]
+    [SerializeField] float bodyTurnMaxDeg = 80f;
+    [Tooltip("EMA toward the new yaw each frame. LOW = smoother/steadier (kills flicker) but laggier.")]
+    [SerializeField][Range(0.02f, 0.5f)] float bodyTurnSmoothing = 0.12f;
+    [Tooltip("Ignore turns smaller than this (keeps the body dead-steady when you face forward).")]
+    [SerializeField] float bodyTurnDeadzoneDeg = 6f;
+    [Tooltip("Flip if the body turns the WRONG way (turn right → body turns left).")]
+    [SerializeField] bool bodyTurnInvert = false;
+    float _yawDeg;                         // smoothed body yaw in degrees
+    Quaternion _bodyYaw = Quaternion.identity;
     [Tooltip("Degrees/second the whole body eases back to its rest pose when NOBODY is detected.")]
     [SerializeField] float restReturnDegPerSec = 300f;
     [Tooltip("Log periodic tracking values to the Android console (adb logcat) for debugging.")]
@@ -130,6 +147,16 @@ public class MediaPipePoseDetector : MonoBehaviour
     public Vector2[] LatestKeypoints { get; private set; }
     public float[] LatestConfidence { get; private set; }
     public bool HasPose { get; private set; }
+
+    // ---- Raw MediaPipe landmarks (image-space), for the Kinex World 3D puppet. ----
+    // The reference web app builds its turning stick-figure directly from these points, so we
+    // expose them verbatim: x,y in 0..1 image space; z is image-space depth (~same scale as x;
+    // smaller/more-negative = closer to camera) which is what makes the puppet turn. Lightly
+    // EMA-smoothed. All-zero until HasPose. PosePuppet3D reads this; nothing else depends on it.
+    public struct NormLandmark { public float x, y, z, visibility; }
+    public NormLandmark[] Landmarks33 => _landmarks33;
+    readonly NormLandmark[] _landmarks33 = new NormLandmark[33];
+    bool _landmarks33Init;
 
     /// <summary>The driven avatar's humanoid Animator (this component lives on the avatar).
     /// Scoring bakes this rig and compares it to the trainer rig, so "avatar looks like the
@@ -474,9 +501,30 @@ public class MediaPipePoseDetector : MonoBehaviour
 
         var norm = result.poseLandmarks[0].landmarks;              // 33 × (x,y normalized)
 
-        // Capture this frame's visibility (used as the per-keypoint confidence/gate).
+        // Capture this frame's visibility (used as the per-keypoint confidence/gate) and the
+        // raw image-space landmarks (x,y,z) for the 3D puppet — the latter lightly EMA-smoothed
+        // since raw MediaPipe depth is jittery.
         for (int i = 0; i < norm.Count && i < 33; i++)
-            _visibility[i] = norm[i].visibility ?? 1f;
+        {
+            var l = norm[i];
+            float vis = l.visibility ?? 1f;
+            _visibility[i] = vis;
+
+            var cur = new NormLandmark { x = l.x, y = l.y, z = l.z, visibility = vis };
+            if (_landmarks33Init)
+            {
+                // Legs (knees/ankles) are the noisiest landmarks — smooth them harder so the
+                // puppet's legs stop flying around on jittery frames.
+                bool isLeg = i == 25 || i == 26 || i == 27 || i == 28;
+                float s = isLeg ? legSmoothing : smoothingFactor;
+                _landmarks33[i].x = Mathf.Lerp(_landmarks33[i].x, cur.x, s);
+                _landmarks33[i].y = Mathf.Lerp(_landmarks33[i].y, cur.y, s);
+                _landmarks33[i].z = Mathf.Lerp(_landmarks33[i].z, cur.z, s);
+                _landmarks33[i].visibility = vis;
+            }
+            else _landmarks33[i] = cur;
+        }
+        _landmarks33Init = true;
 
         // Build + smooth the COCO-17 2D keypoints — the SAME data the skeleton overlay
         // draws. The avatar is driven from this so it matches the on-screen skeleton 1:1.
@@ -654,6 +702,10 @@ public class MediaPipePoseDetector : MonoBehaviour
                       " Rsh=" + rsh.ToString("F2") + " Rel=" + rel.ToString("F2") + " Rwr=" + rwr.ToString("F2"));
         }
 
+        // Body turn (yaw) from the shoulders' horizontal-plane angle — applied to every driven bone
+        // in DriveSegment2D so the whole body rotates coherently when you turn sideways.
+        ComputeBodyYaw();
+
         if (armsOnly)
         {
             // Hold the whole body upright and steady — only the arms follow the user.
@@ -782,7 +834,41 @@ public class MediaPipePoseDetector : MonoBehaviour
         if (target.sqrMagnitude < 0.01f) return;
 
         Quaternion full = Quaternion.FromToRotation(_tPoseDir[bone], target) * _tPoseRot[(int)bone];
-        t.rotation = Quaternion.Slerp(_tPoseRot[(int)bone], full, strength);
+        // Pre-multiply the body yaw so this bone turns WITH the body (all driven bones get the same
+        // yaw → the figure rotates coherently). Identity when bodyTurn is off / facing forward.
+        t.rotation = _bodyYaw * Quaternion.Slerp(_tPoseRot[(int)bone], full, strength);
+    }
+
+    // Body yaw from the two shoulders: their vector in the horizontal (x–z) plane tilts as you turn,
+    // so asin(Δz / shoulderSpan) IS the yaw angle. MediaPipe's z uses ~the same scale as x, so this
+    // is geometrically meaningful. Heavily smoothed + deadzoned; eases to 0 when shoulders aren't
+    // clearly visible. Result drives _bodyYaw (rotation about world-up).
+    void ComputeBodyYaw()
+    {
+        if (!bodyTurn) { _yawDeg = 0f; _bodyYaw = Quaternion.identity; return; }
+
+        var a = _landmarks33[MP_L_SHOULDER];
+        var b = _landmarks33[MP_R_SHOULDER];
+        float raw;
+        if (a.visibility < minBoneVisibility || b.visibility < minBoneVisibility)
+        {
+            raw = 0f; // shoulders unclear → ease back to facing forward
+        }
+        else
+        {
+            float dx = b.x - a.x;
+            float dz = b.z - a.z;
+            float span = Mathf.Sqrt(dx * dx + dz * dz);
+            raw = span > 1e-4f ? Mathf.Asin(Mathf.Clamp(dz / span, -1f, 1f)) * Mathf.Rad2Deg : 0f;
+            raw *= bodyTurnGain;
+            if (flipX) raw = -raw;
+            if (bodyTurnInvert) raw = -raw;
+            raw = Mathf.Clamp(raw, -bodyTurnMaxDeg, bodyTurnMaxDeg);
+            if (Mathf.Abs(raw) < bodyTurnDeadzoneDeg) raw = 0f;
+        }
+
+        _yawDeg = Mathf.Lerp(_yawDeg, raw, bodyTurnSmoothing);
+        _bodyYaw = Quaternion.AngleAxis(_yawDeg, Vector3.up);
     }
 
     // Ease a single bone back toward its rest (bind T-pose) rotation. Used when a joint is
@@ -793,7 +879,7 @@ public class MediaPipePoseDetector : MonoBehaviour
     {
         var t = _animator.GetBoneTransform(bone);
         if (t != null)
-            t.rotation = Quaternion.RotateTowards(t.rotation, _tPoseRot[(int)bone],
+            t.rotation = Quaternion.RotateTowards(t.rotation, _bodyYaw * _tPoseRot[(int)bone],
                                                   restReturnDegPerSec * Time.deltaTime);
     }
 
