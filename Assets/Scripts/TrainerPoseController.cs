@@ -80,6 +80,12 @@ namespace Kinex.Trainer
         public int PoseCount => poseData != null && poseData.poses != null ? poseData.poses.Length : 0;
         public int CurrentPose => _currentPose;
 
+        /// <summary>Display name of a pose (e.g. "หมุนศีรษะ • 1/4 (หันซ้าย)"), for the HUD/instruction card.</summary>
+        public string PoseName(int index) =>
+            (poseData != null && poseData.poses != null && poseData.poses.Length > 0)
+                ? poseData.poses[Wrap(index)].name : "";
+        public string CurrentPoseName => PoseName(_currentPose);
+
         /// <summary>Humanoid Animator on the rig (kept for FK joint lookups during baking).</summary>
         public Animator Animator => _animator;
 

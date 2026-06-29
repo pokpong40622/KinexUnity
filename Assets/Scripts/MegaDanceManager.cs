@@ -183,7 +183,13 @@ namespace Kinex.MegaDance
         void GoToFirstPose(int index)
         {
             _poseIndex = index;
-            if (poseNameText != null)    poseNameText.text = $"ท่าที่ {index + 1}";
+            // Show the exercise + checkpoint label baked into the pose name
+            // (e.g. "หมุนศีรษะ • 1/4 (หันซ้าย)"); fall back to a generic label if empty.
+            if (poseNameText != null)
+            {
+                string nm = trainer.PoseName(index);
+                poseNameText.text = string.IsNullOrEmpty(nm) ? $"ท่าที่ {index + 1}" : nm;
+            }
             if (poseCounterText != null) poseCounterText.text = $"{index + 1}/{trainer.PoseCount}";
             if (poseImage != null)
             {

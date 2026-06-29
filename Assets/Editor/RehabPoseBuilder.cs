@@ -33,65 +33,106 @@ namespace Kinex.EditorTools
             public P(string n, float y, Dictionary<string, float> muscles) { name = n; yaw = y; m = muscles; }
         }
 
-        // Applied to the neutral AND every pose (unless a pose overrides the same muscle), so the
-        // default standing posture has arms hanging at the sides instead of the muscle-zero "zombie".
+        // Anti-robot base posture applied to the neutral AND every checkpoint (unless overridden):
+        // arms hanging relaxed at the sides + a 2-3° knee micro-flexion so the legs never look
+        // electronically locked. A checkpoint that drives a leg/arm muscle simply overrides its entry.
         static Dictionary<string, float> Baseline() => new Dictionary<string, float> {
-            {"Left Arm Down-Up", -0.78f}, {"Right Arm Down-Up", -0.78f},
+            {"Left Arm Down-Up", -0.9f}, {"Right Arm Down-Up", -0.9f},
+            // straighten the relaxed elbows so the forearms hang at the sides instead of clasping
+            // across the belly (sign verified by preview — flip if arms bend more).
+            {"Left Forearm Stretch", 0.6f}, {"Right Forearm Stretch", 0.6f},
+            {"Left Lower Leg Stretch", 0.05f}, {"Right Lower Leg Stretch", 0.05f},
         };
 
-        static List<P> Poses() => new List<P>
+        // One checkpoint = a Thai label + optional whole-body yaw + a muscle override table.
+        class CP
         {
-            // 1. Head Rotation — stand tall, turn head to the side.
-            new P("HeadRotation", 0, new Dictionary<string, float> {
-                {"Head Turn Left-Right", 0.9f}, {"Neck Turn Left-Right", 0.6f}, {"Head Nod Down-Up", 0.1f},
+            public string label;
+            public float yaw;
+            public Dictionary<string, float> m;
+            public CP(string l, Dictionary<string, float> muscles, float y = 0f) { label = l; m = muscles; yaw = y; }
+        }
+
+        // One exercise = a Thai name + an ordered list of checkpoints the trainer holds in turn.
+        class Ex
+        {
+            public string thai;
+            public List<CP> cps;
+            public Ex(string t, List<CP> checkpoints) { thai = t; cps = checkpoints; }
+        }
+
+        // The 10 senior balance exercises (snugsafe list), each broken into its MAJOR checkpoint poses
+        // (distilled from the friend's biomechanical timelines). Simple standing variations — props
+        // (chair/stair/weights/ankle-hold) are cut. Sign conventions for this rig: Lower-Leg-Stretch + =
+        // knee bend; Upper-Leg Front-Back + = thigh up/forward; Left Upper-Leg In-Out − = out (Right + =
+        // out); Arm Down-Up + = raise to side (−0.78 = down); Arm Front-Back − = forward; Spine Front-Back
+        // − = lean forward; Head/Neck Turn ± = look left/right.
+        static List<Ex> Exercises() => new List<Ex>
+        {
+            new Ex("หมุนศีรษะ", new List<CP> {
+                new CP("หันซ้าย",  new Dictionary<string,float>{{"Head Turn Left-Right",0.9f},{"Neck Turn Left-Right",0.55f},{"Spine Twist Left-Right",0.1f}}),
+                new CP("หันขวา",  new Dictionary<string,float>{{"Head Turn Left-Right",-0.9f},{"Neck Turn Left-Right",-0.55f},{"Spine Twist Left-Right",-0.1f}}),
+                new CP("เงยขึ้น", new Dictionary<string,float>{{"Head Nod Down-Up",0.6f},{"Neck Nod Down-Up",0.3f}}),
+                new CP("ก้มลง",   new Dictionary<string,float>{{"Head Nod Down-Up",-0.5f},{"Neck Nod Down-Up",-0.25f}}),
             }),
-            // 2. Foot Taps — right foot forward, toe tapping down (thigh slightly forward, slight knee bend).
-            new P("FootTaps", 0, new Dictionary<string, float> {
-                {"Right Upper Leg Front-Back", 0.22f}, {"Right Lower Leg Stretch", 0.18f},
-                {"Right Foot Up-Down", -0.4f},
+            new Ex("แตะปลายเท้า", new List<CP> {
+                new CP("เท้าซ้าย", new Dictionary<string,float>{{"Left Upper Leg Front-Back",0.25f},{"Left Lower Leg Stretch",0.12f},{"Left Foot Up-Down",-0.4f},{"Spine Left-Right",-0.05f}}),
+                new CP("เท้าขวา", new Dictionary<string,float>{{"Right Upper Leg Front-Back",0.25f},{"Right Lower Leg Stretch",0.12f},{"Right Foot Up-Down",-0.4f},{"Spine Left-Right",0.05f}}),
             }),
-            // 3. Marching — right knee lifted high (thigh up + knee bent), opposite arm swung forward.
-            new P("Marching", 0, new Dictionary<string, float> {
-                {"Right Upper Leg Front-Back", 0.8f}, {"Right Lower Leg Stretch", 0.7f},
-                {"Left Arm Front-Back", -0.5f},
+            new Ex("ย่ำเท้าอยู่กับที่", new List<CP> {
+                new CP("เข่าซ้ายขึ้น", new Dictionary<string,float>{{"Left Upper Leg Front-Back",0.95f},{"Left Lower Leg Stretch",0.85f},{"Right Arm Front-Back",-0.45f}}),
+                new CP("เข่าขวาขึ้น", new Dictionary<string,float>{{"Right Upper Leg Front-Back",0.95f},{"Right Lower Leg Stretch",0.85f},{"Left Arm Front-Back",-0.45f}}),
             }),
-            // 4. Rock the Boat — left leg lifted OUT to the side, arms out for balance.
-            new P("RockTheBoat", 0, new Dictionary<string, float> {
-                {"Left Upper Leg In-Out", -0.7f}, {"Left Arm Down-Up", 0.55f}, {"Right Arm Down-Up", 0.55f},
+            new Ex("โยกตัวออกข้าง", new List<CP> {
+                new CP("ขาซ้ายออกข้าง", new Dictionary<string,float>{{"Left Upper Leg In-Out",-0.7f},{"Left Arm Down-Up",0.5f},{"Right Arm Down-Up",0.5f}}),
+                new CP("ขาขวาออกข้าง", new Dictionary<string,float>{{"Right Upper Leg In-Out",0.7f},{"Left Arm Down-Up",0.5f},{"Right Arm Down-Up",0.5f}}),
             }),
-            // 5. Clock Reach — left arm reaching up (to 12), left foot lifted slightly.
-            new P("ClockReach", 0, new Dictionary<string, float> {
-                {"Left Arm Down-Up", 1.0f}, {"Left Arm Front-Back", -0.25f},
-                {"Left Upper Leg Front-Back", 0.18f},
+            new Ex("เอื้อมตามเข็มนาฬิกา", new List<CP> {
+                new CP("เอื้อม 12 นาฬิกา", new Dictionary<string,float>{{"Left Arm Down-Up",1.0f},{"Left Arm Front-Back",-0.2f},{"Left Upper Leg Front-Back",0.15f}}),
+                new CP("เอื้อมด้านข้าง",   new Dictionary<string,float>{{"Left Arm Down-Up",0.3f},{"Left Upper Leg Front-Back",0.15f}}),
+                new CP("เอื้อมด้านหลัง",   new Dictionary<string,float>{{"Left Arm Down-Up",-0.1f},{"Left Arm Front-Back",0.4f},{"Left Upper Leg Front-Back",0.15f}}),
             }),
-            // 6. Alternating Vision Walk — step forward while looking over the shoulder (front-facing).
-            new P("VisionWalk", 0, new Dictionary<string, float> {
-                {"Head Turn Left-Right", -0.85f}, {"Neck Turn Left-Right", -0.5f},
-                {"Right Upper Leg Front-Back", 0.32f}, {"Right Lower Leg Stretch", 0.12f},
-                {"Left Arm Front-Back", -0.3f},
+            new Ex("เดินมองข้างหลัง", new List<CP> {
+                new CP("มองข้ามไหล่ขวา", new Dictionary<string,float>{{"Head Turn Left-Right",-0.85f},{"Neck Turn Left-Right",-0.5f},{"Right Upper Leg Front-Back",0.3f},{"Right Lower Leg Stretch",0.1f}}),
+                new CP("มองข้ามไหล่ซ้าย", new Dictionary<string,float>{{"Head Turn Left-Right",0.85f},{"Neck Turn Left-Right",0.5f},{"Left Upper Leg Front-Back",0.3f},{"Left Lower Leg Stretch",0.1f}}),
             }),
-            // 7. Single Leg Raise — left leg raised BEHIND, slight forward lean, arms out for balance.
-            new P("LegRaiseBack", 0, new Dictionary<string, float> {
-                {"Left Upper Leg Front-Back", -0.45f}, {"Spine Front-Back", -0.2f},
-                {"Left Arm Down-Up", 0.35f}, {"Right Arm Down-Up", 0.35f},
+            new Ex("ยกขาทรงตัว", new List<CP> {
+                new CP("ยกขาซ้าย", new Dictionary<string,float>{{"Left Upper Leg Front-Back",0.7f},{"Left Lower Leg Stretch",0.85f},{"Right Arm Down-Up",0.85f}}),
+                new CP("ยกขาขวา", new Dictionary<string,float>{{"Right Upper Leg Front-Back",0.7f},{"Right Lower Leg Stretch",0.85f},{"Left Arm Down-Up",0.85f}}),
             }),
-            // 8. Body Circles — upper body leaned to the side, one arm raised out.
-            new P("BodyCircle", 0, new Dictionary<string, float> {
-                {"Spine Left-Right", 0.6f}, {"Spine Front-Back", -0.15f}, {"Left Arm Down-Up", 0.4f},
+            // "airplane" arms = straight out to the sides at shoulder height (~horizontal abduction);
+            // keep the elbow straightened by the baseline Lower-Arm-Stretch.
+            new Ex("หมุนลำตัว", new List<CP> {
+                new CP("เอนไปหน้า", new Dictionary<string,float>{{"Spine Front-Back",-0.25f},{"Left Arm Down-Up",0.45f},{"Right Arm Down-Up",0.45f}}),
+                new CP("เอนไปซ้าย", new Dictionary<string,float>{{"Spine Left-Right",0.45f},{"Left Arm Down-Up",0.45f},{"Right Arm Down-Up",0.45f}}),
+                new CP("เอนไปหลัง", new Dictionary<string,float>{{"Spine Front-Back",0.18f},{"Left Arm Down-Up",0.45f},{"Right Arm Down-Up",0.45f}}),
+                new CP("เอนไปขวา", new Dictionary<string,float>{{"Spine Left-Right",-0.45f},{"Left Arm Down-Up",0.45f},{"Right Arm Down-Up",0.45f}}),
             }),
-            // 9. Grapevine — side-step: left leg out to the side, lean slightly, arms low for balance.
-            new P("Grapevine", 0, new Dictionary<string, float> {
-                {"Left Upper Leg In-Out", -0.65f}, {"Spine Left-Right", -0.18f},
-                {"Left Arm Down-Up", -0.2f}, {"Right Arm Down-Up", -0.2f},
+            new Ex("ก้าวไขว้", new List<CP> {
+                new CP("ซ้ายไขว้หน้า", new Dictionary<string,float>{{"Left Upper Leg In-Out",0.5f},{"Left Lower Leg Stretch",0.2f},{"Right Lower Leg Stretch",0.2f},{"Left Arm Down-Up",-0.3f},{"Right Arm Down-Up",-0.3f}}),
+                new CP("ขวาไขว้หลัง", new Dictionary<string,float>{{"Right Upper Leg In-Out",0.4f},{"Right Upper Leg Front-Back",-0.12f},{"Left Lower Leg Stretch",0.2f},{"Right Lower Leg Stretch",0.2f}}),
             }),
-            // 10. Sit-To-Stand — half-squat: thighs forward, knees bent, lean forward, arms swung forward.
-            new P("SitToStand", 0, new Dictionary<string, float> {
-                {"Left Upper Leg Front-Back", 0.5f}, {"Right Upper Leg Front-Back", 0.5f},
-                {"Left Lower Leg Stretch", 0.7f}, {"Right Lower Leg Stretch", 0.7f},
-                {"Spine Front-Back", -0.4f},
-                {"Left Arm Front-Back", -0.35f}, {"Right Arm Front-Back", -0.35f},
+            new Ex("ลุก-นั่ง", new List<CP> {
+                new CP("ย่อตัวลง", new Dictionary<string,float>{{"Left Upper Leg Front-Back",0.55f},{"Right Upper Leg Front-Back",0.55f},{"Left Lower Leg Stretch",0.75f},{"Right Lower Leg Stretch",0.75f},{"Spine Front-Back",-0.35f},{"Left Arm Front-Back",-0.45f},{"Right Arm Front-Back",-0.45f}}),
+                new CP("ยืนขึ้น",  new Dictionary<string,float>{{"Left Arm Front-Back",-0.25f},{"Right Arm Front-Back",-0.25f}}),
             }),
         };
+
+        // Flatten the exercises into the per-pose list the baker consumes. pose.name carries the display
+        // label "<exercise> • k/n" so the game HUD can show which exercise + checkpoint is active.
+        static List<P> Poses()
+        {
+            var list = new List<P>();
+            foreach (var ex in Exercises())
+            {
+                for (int k = 0; k < ex.cps.Count; k++)
+                {
+                    var cp = ex.cps[k];
+                    list.Add(new P($"{ex.thai} • {k + 1}/{ex.cps.Count} ({cp.label})", cp.yaw, cp.m));
+                }
+            }
+            return list;
+        }
 
         static bool _restDebug;
         static bool _calib;
