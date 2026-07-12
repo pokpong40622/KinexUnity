@@ -42,7 +42,16 @@ namespace Kinex.MegaDance
         };
 
         readonly Vector2[] _kp = new Vector2[17];
+        readonly Vector3[] _world = new Vector3[17];
         readonly bool[] _valid = new bool[PoseScorer.NumLimbs];
+
+        // Canonicalize each body's FACING (rotation about vertical) before the frontal projection,
+        // so scoring compares limb SHAPE regardless of which way the rig points in world space.
+        // REQUIRED in this scene: the trainer rig faces -X (shoulders run along the DEPTH axis) while
+        // the player avatar faces -Z. Project() drops Z, so without this the trainer's whole pose
+        // collapsed into the discarded axis → every target was garbage → nothing could score. As a
+        // bonus it also neutralises each pose's authored side-on turn. Off = legacy raw projection.
+        public bool yawNormalize = true;
 
         /// <summary>
         /// Bake the signature from whatever pose the rig currently holds.
@@ -63,8 +72,11 @@ namespace Kinex.MegaDance
             foreach (var (coco, bone) in JointMap)
             {
                 Transform t = animator.GetBoneTransform(bone);
-                _kp[coco] = t != null ? Project(t.position) : Vector2.zero;
+                _world[coco] = t != null ? t.position : Vector3.zero;
             }
+            if (yawNormalize) NormalizeFacing();
+            foreach (var (coco, bone) in JointMap)
+                _kp[coco] = Project(_world[coco]);
             // conf=null → every joint counts; ComputeAngles guarantees identical math
             // to the player-side scoring path.
             PoseScorer.ComputeAngles(_kp, null, 0f, angles, _valid);
@@ -79,6 +91,22 @@ namespace Kinex.MegaDance
         }
 
         static void Swap(float[] a, int i, int j) { (a[i], a[j]) = (a[j], a[i]); }
+
+        // Rotate the sampled joints about VERTICAL (through the hip mid-point) so the hip line lies
+        // along world -X — i.e. the body faces -Z, the axis the frontal Project() expects. We flatten
+        // the hip vector to the X-Z plane first, so this is a PURE yaw: it removes body facing only,
+        // never the pose's limb shape. Because we align the right-vector to a single target, a pose
+        // and the same pose turned by ANY angle normalise to the same result (front/back included).
+        void NormalizeFacing()
+        {
+            Vector3 hipMid = (_world[11] + _world[12]) * 0.5f;   // L/R upper-leg roots = pelvis line
+            Vector3 right  = _world[12] - _world[11];
+            Vector3 flat   = new Vector3(right.x, 0f, right.z);
+            if (flat.sqrMagnitude < 1e-8f) return;               // hips edge-on → can't read yaw
+            Quaternion q = Quaternion.FromToRotation(flat, Vector3.left); // -X
+            foreach (var (coco, bone) in JointMap)
+                _world[coco] = hipMid + q * (_world[coco] - hipMid);
+        }
 
         /// <summary>
         /// World position → frontal image-plane point. Trainer faces -Z, so a frontal

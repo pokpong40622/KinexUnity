@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using Kinex.MegaDance; // PoseScorer + PoseSignatureBaker (reused unchanged)
+using Kinex.UI;
 
 namespace Kinex.World
 {
@@ -100,6 +101,7 @@ namespace Kinex.World
         public WorldSessionResult LastResult { get; private set; }
 
         readonly PoseSignatureBaker _baker = new PoseSignatureBaker();
+        GameHud _hud; // corner ring gauges (heart-rate mock + live match %)
         Coroutine _run;
         float _stubBias = 0.78f; // centre of the random stub band
 
@@ -247,6 +249,9 @@ namespace Kinex.World
         {
             Current = State.Active;
             ShowOnly(hudPanel);
+            _hud = GameHud.Ensure(hudPanel);
+            _hud?.HideLegacy(liveBarFill != null ? liveBarFill.gameObject : null,
+                              percentText != null ? percentText.gameObject : null);
             Kinex.ScoreHud.EnsurePassLine(liveBarFill); // 70% target marker on the live bar (idempotent)
             PlayClip(ex);
 
@@ -341,6 +346,8 @@ namespace Kinex.World
             if (liveBarFill) liveBarFill.fillAmount = LiveScore01;
             if (percentText) percentText.text = $"{Mathf.RoundToInt(LiveScore01 * 100f)}%";
             Kinex.ScoreHud.Apply(percentText, liveBarFill, LiveScore01); // colour by band (<50 red, <70 yellow, >=70 green)
+            _hud?.SetScore(LiveScore01);
+            _hud?.SetSubLabel(exerciseCounterText != null ? exerciseCounterText.text : null);
             if (encourageText)
                 encourageText.text = LiveScore01 >= 0.75f ? "เยี่ยม!" :
                                      LiveScore01 >= 0.5f ? "ดีมาก!" : "สู้ต่อไป!";

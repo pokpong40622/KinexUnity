@@ -4,6 +4,7 @@ using UnityEngine.InputSystem;
 using UnityEngine.UI;
 using TMPro;
 using Kinex.Trainer;
+using Kinex.UI;
 
 namespace Kinex.MegaDance
 {
@@ -74,6 +75,7 @@ namespace Kinex.MegaDance
         public Image poseImage;              // FirstPose card, target-pose preview sprite
         public TMP_Text countdownText;       // FirstPose 3-2-1 countdown
         public TMP_Text poseCounterText;     // HUD "3/10"
+        public TMP_Text trackingModeLabel;   // gear-popup toggle button label, live "Mode: 2D/3D"
         public TMP_Text percentText;         // HUD bottom strip, "0%".."100%" closeness
         public Image matchBarFill;           // HUD bar, fillAmount 0..1 = live score
         public TMP_Text correctPoseNameText; // small name under big "Correct!"
@@ -87,6 +89,21 @@ namespace Kinex.MegaDance
                  "stays visible as a small corner icon after auto-start (the StartPanel itself is hidden).")]
         public GameObject settingsGearButton;
 
+        [Header("Camera preview")]
+        [Tooltip("Corner webcam + skeleton preview (CameraFeedPanel). Hidden during the get-ready pose " +
+                 "popup so it never covers the card; shown again while Playing.")]
+        public GameObject cameraPreview;
+
+        [Header("Coaching — turn cue (3D mode only)")]
+        [Tooltip("Flip if the spoken 'Turn right' actually sends the player the wrong way on device.")]
+        [SerializeField] bool invertTurnCue = false;
+        [Tooltip("Ignore turn errors smaller than this (degrees) so the coach doesn't nag near-aligned.")]
+        [SerializeField] float turnCueDeadzoneDeg = 20f;
+        [Tooltip("Constant offset (deg) added to the avatar hip-yaw before comparing to the trainer, in " +
+                 "case the two rigs don't share the same rest facing. Read the [Coach] logcat line on " +
+                 "device (with scoreDebugLog on) to dial this in — no rebuild needed.")]
+        [SerializeField] float turnCueOffsetDeg = 0f;
+
         State _state = State.Idle;
         int _poseIndex;                      // current target pose; trainer animates to it on EnterPlaying
         float[][] _signatures;               // [pose][8] baked angle targets
@@ -97,6 +114,7 @@ namespace Kinex.MegaDance
         float _poseStartTime;                // Time.time EnterPlaying ran — drives the combo window
         bool _greenCued;                     // played the "you're in the zone" cue once this pose?
 
+        GameHud _hud;                        // corner ring gauges (heart-rate mock + live match %)
         TMP_Text _hintText;                  // bottom-strip coaching line, created at runtime
         float _lastHintAt;                   // throttle the hint refresh
         readonly float[] _avatarAngles = new float[PoseScorer.NumLimbs]; // baked avatar rig, scored vs trainer
@@ -131,7 +149,8 @@ namespace Kinex.MegaDance
             if (trainer == null) { Debug.LogError("[MegaDanceManager] trainer not assigned."); return; }
             trainer.autoAdvance = false; // the manager controls progression, not the trainer
             trainer.blendTime = 0.8f;    // ~15% slower pose-to-pose blend so it's easier to follow
-            toleranceDegrees = 45f;      // stricter: user must match the trainer more closely to score
+            toleranceDegrees = 30f;      // stricter per-limb angle match (was 45 — passed too easily)
+            passThreshold = 0.75f;       // need a closer overall match to clear (was 0.70)
             // Talk more often (default gap is 2s) so coaching feels responsive.
             if (voice != null) voice.minGapSeconds = 0.7f;
             _combo = 0;
@@ -190,13 +209,19 @@ namespace Kinex.MegaDance
                 string nm = trainer.PoseName(index);
                 poseNameText.text = string.IsNullOrEmpty(nm) ? $"ท่าที่ {index + 1}" : nm;
             }
-            if (poseCounterText != null) poseCounterText.text = $"{index + 1}/{trainer.PoseCount}";
+            if (poseCounterText != null)
+            {
+                // Show the active tracking mode so the tester can verify which driver (3D / 2D) is live.
+                string mode = poseDetector != null && poseDetector.Use3DWorld ? "3D" : "2D";
+                poseCounterText.text = $"{index + 1}/{trainer.PoseCount}   ·   โหมด {mode}";
+            }
             if (poseImage != null)
             {
                 var sprite = Resources.Load<Sprite>($"PosePreviews/pose_{index + 1:00}");
                 if (sprite != null) poseImage.sprite = sprite;
             }
             SetPanels(instruction: true, hud: false, correct: false, results: false, start: false);
+            if (cameraPreview != null) cameraPreview.SetActive(false); // don't cover the pose card
             Kinex.Sfx.Play("pose_appear"); // soft whoosh as the new pose card shows
             StartCoroutine(FirstPoseRoutine());
         }
@@ -241,6 +266,10 @@ namespace Kinex.MegaDance
         {
             trainer.ShowPose(_poseIndex); // animate into the pose now that the card is gone (visible)
             SetPanels(instruction: false, hud: true, correct: false, results: false, start: false);
+            if (cameraPreview != null) cameraPreview.SetActive(true); // framing preview back during play
+            _hud = GameHud.Ensure(hudPanel);
+            _hud?.HideLegacy(matchBarFill != null ? matchBarFill.gameObject : null,
+                              percentText != null ? percentText.gameObject : null);
             Kinex.ScoreHud.EnsurePassLine(matchBarFill); // 70% target marker on the bar (idempotent)
             EnsureHintText();
             if (_hintText != null) _hintText.text = "";
@@ -255,6 +284,7 @@ namespace Kinex.MegaDance
 
         void Update()
         {
+            RefreshTrackingModeLabel(); // keep the 2D/3D indicator live even in menus / the gear popup
             if (_state != State.Playing) return;
 
             // EMA so per-frame keypoint jitter doesn't flicker the % or trip a false pass.
@@ -264,6 +294,8 @@ namespace Kinex.MegaDance
             if (matchBarFill != null) matchBarFill.fillAmount = _smoothedScore;
             if (percentText != null)  percentText.text = $"{Mathf.RoundToInt(_smoothedScore * 100f)}%";
             Kinex.ScoreHud.Apply(percentText, matchBarFill, _smoothedScore); // colour by band (<50 red, <70 yellow, >=70 green)
+            _hud?.SetScore(_smoothedScore);
+            _hud?.SetSubLabel(poseCounterText != null ? poseCounterText.text : null);
 
             UpdateHint(); // bottom coaching line: "Move <limb> up/down/left/right" (throttled)
 
@@ -372,19 +404,57 @@ namespace Kinex.MegaDance
             // In the green zone, stop coaching and shout "hold it" so hitting 70% is unmistakable.
             if (_smoothedScore >= passThreshold)
             {
-                _hintText.text = "เยี่ยม! ค้างไว้!";
+                _hintText.text = "Great! Hold it!";
                 return;
             }
 
             float[] target = _signatures[trainer.CurrentPose];
-            // _avatarAngles was baked this frame in ReadScore. mirrorLR=true flips the named side so
-            // the coaching matches the limb the USER must move (the avatar mirrors them).
-            // ~12° deadzone so we don't nag on near-correct limbs.
-            _hintText.text = PoseHint.Compute(_avatarAngles, target, null, 12f * Mathf.Deg2Rad, mirrorLR: false);
+
+            // TURN cue (3D only): yaw can't be read in the flat 2D driver, so only coach turning when
+            // the 3D world driver is live. Compare the avatar's hip world-yaw to the trainer's; a big
+            // signed gap means the player is facing the wrong way for a side-on pose. The three
+            // Inspector knobs (invert / deadzone / offset) tune it on device without a rebuild.
+            float turnErr = 0f;
+            if (poseDetector.Use3DWorld)
+            {
+                var avatarHips  = poseDetector.AvatarAnimator != null
+                    ? poseDetector.AvatarAnimator.GetBoneTransform(HumanBodyBones.Hips) : null;
+                var trainerHips = trainer.Animator != null
+                    ? trainer.Animator.GetBoneTransform(HumanBodyBones.Hips) : null;
+                if (avatarHips != null && trainerHips != null)
+                {
+                    turnErr = Mathf.DeltaAngle(avatarHips.rotation.eulerAngles.y + turnCueOffsetDeg,
+                                               trainerHips.rotation.eulerAngles.y);
+                    if (invertTurnCue) turnErr = -turnErr;
+                }
+                if (scoreDebugLog) Debug.Log($"[Coach] turnErr={turnErr:F0}° deadzone={turnCueDeadzoneDeg}°");
+            }
+
+            // _avatarAngles was baked this frame in ReadScore. Turn cue takes priority over the
+            // worst-limb cue; ~12° limb deadzone so we don't nag on near-correct limbs.
+            // Turn cue DISABLED: scoring is now facing-invariant (PoseSignatureBaker.yawNormalize),
+            // so the player just faces the screen and matches limb shape — "turn" would be wrong
+            // advice. Passing a huge deadzone suppresses it; limb cues remain. (turnErr still logged.)
+            _hintText.text = PoseHint.Compute(_avatarAngles, target, null, 12f * Mathf.Deg2Rad,
+                                              mirrorLR: false,
+                                              turnErrorDeg: turnErr, turnDeadzoneDeg: 9999f);
 
             // Read the line aloud. VoiceCoach only actually speaks when the line changed,
             // nothing is playing, and its min-gap elapsed — so calling every refresh is fine.
             if (voice != null) voice.Speak(_hintText.text);
+        }
+
+        // Keep the 2D/3D indicators in sync with the live detector flag so the gear toggle's effect
+        // is visible immediately: the toggle's own button label always reflects the current driver,
+        // and the HUD counter shows it too while a game runs.
+        void RefreshTrackingModeLabel()
+        {
+            if (poseDetector == null) return;
+            bool is3D = poseDetector.Use3DWorld;
+            if (trackingModeLabel != null)
+                trackingModeLabel.text = is3D ? "Mode: 3D  —  tap to switch" : "Mode: 2D  —  tap to switch";
+            if (_state == State.Playing && poseCounterText != null)
+                poseCounterText.text = $"{trainer.CurrentPose + 1}/{trainer.PoseCount}   ·   โหมด {(is3D ? "3D" : "2D")}";
         }
 
         IEnumerator CorrectSequence()
@@ -404,9 +474,7 @@ namespace Kinex.MegaDance
             CorrectEffect.Style(correctOverlay, out var correctRt, out var correctGroup);
             StartCoroutine(CorrectEffect.Pop(correctRt, correctGroup));
             if (correctPoseNameText != null)
-                correctPoseNameText.text = _combo >= 2
-                    ? $"ท่าที่ {trainer.CurrentPose + 1}   •   คอมโบ x{_combo}!"
-                    : $"ท่าที่ {trainer.CurrentPose + 1}";
+                correctPoseNameText.text = $"ท่าที่ {trainer.CurrentPose + 1}"; // rehab: no combo text
             if (matchBarFill != null) matchBarFill.fillAmount = 1f;
             if (percentText != null)  percentText.text = "100%";
             Kinex.ScoreHud.Apply(percentText, matchBarFill, 1f); // pass = green

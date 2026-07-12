@@ -29,8 +29,9 @@ namespace Kinex.MegaDance
             var tmp = overlay.GetComponentInChildren<TMP_Text>(true);
             if (tmp == null) return;
 
-            // Big italic Montserrat-ish look (uses whatever TMP font is already assigned).
-            tmp.fontStyle = FontStyles.Italic | FontStyles.Bold;
+            // Font is already Montserrat-BlackItalic SDF — do NOT re-apply Italic|Bold
+            // (stacking them double-shears glyphs and faux-bolds, causing the wide/oddly-spaced look).
+            tmp.fontStyle = FontStyles.Normal;
             tmp.enableAutoSizing = false;
             tmp.fontSize = 100f;                       // smaller so "Correct!" fits one line
             tmp.alignment = TextAlignmentOptions.Center;

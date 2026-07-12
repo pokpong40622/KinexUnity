@@ -90,6 +90,10 @@ public class MediaPipePoseDetector : MonoBehaviour
              "the most reliable landmarks, so this avoids the torso twisting from shaky 3D depth. " +
              "Used by both games.")]
     [SerializeField] bool armsOnly = false;
+    [Tooltip("Drive the avatar from MediaPipe 3D WORLD landmarks (metric, hip-centered — BlazePose " +
+             "GHUM): full-body depth + real left/right rotation. OFF = the legacy 2D screen-plane drive " +
+             "(flat, no real turn). Toggle live via the gear panel; persisted.")]
+    [SerializeField] bool use3DWorld = true;
     [Tooltip("How strongly the avatar follows you (motion range). 1 = full; lower = gentler, less " +
              "wild extremes. Adjustable in-game (Sensitivity).")]
     [SerializeField][Range(0.2f, 1f)] float followStrength = 1f;
@@ -102,6 +106,13 @@ public class MediaPipePoseDetector : MonoBehaviour
     [Tooltip("How far the hips translate horizontally (avatar local units). Higher = bigger sway. " +
              "0.5 was imperceptible on device — bumped to 2.5; tune live if it's now too much/little.")]
     [SerializeField] float hipSwayScale = 2.5f;
+    [Header("3D depth — 2.5D hybrid")]
+    [Tooltip("How much of MediaPipe's noisy world-DEPTH (z) to keep when driving limbs in 3D mode. " +
+             "1 = full 3D (limbs foreshorten + lag toward the camera vs the flat 2D skeleton). " +
+             "0 = flat like 2D. ~0.35 keeps enough depth for turn/side-on poses to score while the " +
+             "limbs stay responsive + match the on-screen skeleton. Tune live in the Inspector.")]
+    [SerializeField][Range(0f, 1f)] float worldDepthScale = 0.35f;
+
     [Header("Body Turn (yaw) — rotate the WHOLE body when you turn left/right")]
     [Tooltip("Turn the avatar's body to match you turning sideways. Derived from the two shoulders' " +
              "angle in the horizontal plane (asin of their depth gap). Heavily smoothed. One toggle " +
@@ -109,8 +120,9 @@ public class MediaPipePoseDetector : MonoBehaviour
     [SerializeField] bool bodyTurn = true;
     [Tooltip("Amplify the detected turn. The front-cam depth tends to under-read the real turn, so >1.")]
     [SerializeField] float bodyTurnGain = 1.4f;
-    [Tooltip("Clamp the turn so a bad frame can't spin the body past this many degrees.")]
-    [SerializeField] float bodyTurnMaxDeg = 80f;
+    [Tooltip("Clamp the turn so a bad frame can't spin the body past this many degrees. ~90 lets the " +
+             "player turn far enough to match a side-on trainer pose (toe-touch/march/leg-raise/squat).")]
+    [SerializeField] float bodyTurnMaxDeg = 92f;
     [Tooltip("EMA toward the new yaw each frame. LOW = smoother/steadier (kills flicker) but laggier.")]
     [SerializeField][Range(0.02f, 0.5f)] float bodyTurnSmoothing = 0.12f;
     [Tooltip("Ignore turns smaller than this (keeps the body dead-steady when you face forward).")]
@@ -157,6 +169,11 @@ public class MediaPipePoseDetector : MonoBehaviour
     public NormLandmark[] Landmarks33 => _landmarks33;
     readonly NormLandmark[] _landmarks33 = new NormLandmark[33];
     bool _landmarks33Init;
+
+    // ---- Metric 3D WORLD landmarks (BlazePose GHUM), hip-centered, in meters: x right / y down /
+    //      z toward-camera. EMA-smoothed (legs harder). All-zero until HasPose. Drives the 3D avatar. ----
+    readonly NormLandmark[] _world33 = new NormLandmark[33];
+    bool _world33Init;
 
     /// <summary>The driven avatar's humanoid Animator (this component lives on the avatar).
     /// Scoring bakes this rig and compares it to the trainer rig, so "avatar looks like the
@@ -529,6 +546,30 @@ public class MediaPipePoseDetector : MonoBehaviour
         // Build + smooth the COCO-17 2D keypoints — the SAME data the skeleton overlay
         // draws. The avatar is driven from this so it matches the on-screen skeleton 1:1.
         BuildCocoKeypoints(norm);
+
+        // Capture + smooth the metric 3D WORLD landmarks (BlazePose GHUM) for the 3D driver. Same
+        // EMA scheme as the image-space landmarks above (legs smoothed harder — they're noisiest).
+        if (result.poseWorldLandmarks != null && result.poseWorldLandmarks.Count > 0)
+        {
+            var w = result.poseWorldLandmarks[0].landmarks;
+            for (int i = 0; i < w.Count && i < 33; i++)
+            {
+                var l = w[i];
+                float vis = _visibility[i]; // reuse this joint's normalized-landmark visibility
+                if (_world33Init)
+                {
+                    bool isLeg = i == 25 || i == 26 || i == 27 || i == 28;
+                    float s = isLeg ? legSmoothing : smoothingFactor;
+                    _world33[i].x = Mathf.Lerp(_world33[i].x, l.x, s);
+                    _world33[i].y = Mathf.Lerp(_world33[i].y, l.y, s);
+                    _world33[i].z = Mathf.Lerp(_world33[i].z, l.z, s);
+                    _world33[i].visibility = vis;
+                }
+                else _world33[i] = new NormLandmark { x = l.x, y = l.y, z = l.z, visibility = vis };
+            }
+            _world33Init = true;
+        }
+
         HasPose = true;
     }
 
@@ -537,7 +578,11 @@ public class MediaPipePoseDetector : MonoBehaviour
     void LateUpdate()
     {
         if (!drivesAvatar) return;
-        if (HasPose) ApplyToBones();
+        if (HasPose)
+        {
+            if (use3DWorld && _world33Init) ApplyToBones3D(); // BlazePose GHUM 3D world landmarks
+            else ApplyToBones();                              // legacy 2D screen-plane fallback
+        }
         else RestAll(); // nobody in frame → ease the body back to its rest pose
     }
 
@@ -622,7 +667,8 @@ public class MediaPipePoseDetector : MonoBehaviour
     // known until the app runs on the device — the standalone webcam/test-video that "worked"
     // isn't mirrored the same way. So these are adjustable in-game and persisted across runs.
     const string PrefX = "kinex_flipX", PrefY = "kinex_flipY",
-                 PrefSens = "kinex_sens", PrefArms = "kinex_armsonly";
+                 PrefSens = "kinex_sens", PrefArms = "kinex_armsonly",
+                 PrefTrack3D = "kinex_use3dworld";
 
     public bool FlipX => flipX;
     public bool FlipY => flipY;
@@ -639,6 +685,13 @@ public class MediaPipePoseDetector : MonoBehaviour
     // DEMO switch: flip between full-body 2D tracking and arms-only (locked body).
     public void ToggleArmsOnly() { armsOnly = !armsOnly; PlayerPrefs.SetInt(PrefArms, armsOnly ? 1 : 0); PlayerPrefs.Save(); }
 
+    public bool Use3DWorld => use3DWorld;
+    // Smoothed whole-body yaw (degrees) the avatar is currently turned by. Used by the coach to
+    // tell the player to turn toward a side-on trainer pose (yaw can't be seen in 2D image space).
+    public float YawDeg => _yawDeg;
+    // Flip between the 3D world-landmark driver and the 2D screen-plane fallback (default 2D).
+    public void ToggleTracking3D() { use3DWorld = !use3DWorld; PlayerPrefs.SetInt(PrefTrack3D, use3DWorld ? 1 : 0); PlayerPrefs.Save(); }
+
     void LoadFlips()
     {
         // flipX and flipY are NO LONGER loaded from PlayerPrefs. The serialized Inspector defaults
@@ -651,6 +704,11 @@ public class MediaPipePoseDetector : MonoBehaviour
         // Sensitivity and arms-only mode are still persisted (user-adjustable in-game).
         if (PlayerPrefs.HasKey(PrefSens)) followStrength = PlayerPrefs.GetFloat(PrefSens);
         if (PlayerPrefs.HasKey(PrefArms)) armsOnly = PlayerPrefs.GetInt(PrefArms) == 1;
+
+        // Tracking mode: DEFAULT 2D (flat screen-plane driver), but the player's last gear choice
+        // persists across relaunches so the toggle actually sticks. (Previously we force-reset to 3D
+        // every boot, which made the toggle look broken — 2D never survived a relaunch.)
+        use3DWorld = PlayerPrefs.HasKey(PrefTrack3D) ? PlayerPrefs.GetInt(PrefTrack3D) == 1 : false;
     }
 
     void BuildCocoKeypoints(IReadOnlyList<Mediapipe.Tasks.Components.Containers.NormalizedLandmark> norm)
@@ -830,8 +888,13 @@ public class MediaPipePoseDetector : MonoBehaviour
 
         float dx = to2D.x - from2D.x; if (flipX) dx = -dx;
         float dy = to2D.y - from2D.y; if (flipY) dy = -dy;
-        Vector3 target = new Vector3(dx, dy, 0f).normalized;
-        if (target.sqrMagnitude < 0.01f) return;
+        Vector3 screenTarget = new Vector3(dx, dy, 0f);
+        if (screenTarget.sqrMagnitude < 0.01f) return;
+        // De-yaw the screen-plane target into the body-local (un-turned) frame BEFORE matching the bone,
+        // then re-apply _bodyYaw — exactly like DriveSegment3D. Without this de-yaw the bend was matched
+        // in the un-rotated frame and then spun by _bodyYaw, so "turn right + bend forward" bent the
+        // WRONG side. With it, the bend stays correct regardless of how far the body is turned.
+        Vector3 target = (Quaternion.Inverse(_bodyYaw) * screenTarget).normalized;
 
         Quaternion full = Quaternion.FromToRotation(_tPoseDir[bone], target) * _tPoseRot[(int)bone];
         // Pre-multiply the body yaw so this bone turns WITH the body (all driven bones get the same
@@ -857,7 +920,7 @@ public class MediaPipePoseDetector : MonoBehaviour
         else
         {
             float dx = b.x - a.x;
-            float dz = b.z - a.z;
+            float dz = b.z - a.z; // restored: negating this (a speculative "match-3D" tweak) flipped the 2D turn the WRONG way on device
             float span = Mathf.Sqrt(dx * dx + dz * dz);
             raw = span > 1e-4f ? Mathf.Asin(Mathf.Clamp(dz / span, -1f, 1f)) * Mathf.Rad2Deg : 0f;
             raw *= bodyTurnGain;
@@ -869,6 +932,137 @@ public class MediaPipePoseDetector : MonoBehaviour
 
         _yawDeg = Mathf.Lerp(_yawDeg, raw, bodyTurnSmoothing);
         _bodyYaw = Quaternion.AngleAxis(_yawDeg, Vector3.up);
+    }
+
+    // ==================== 3D WORLD-LANDMARK DRIVING (BlazePose GHUM) ====================
+    // Same FK as the 2D path (rotate each bone from its bind direction to the segment direction),
+    // but the target is a FULL 3D vector from the metric world landmarks — so depth and a limb
+    // pointing toward/away from the camera are represented, and the body reads as truly turned, not
+    // flat. The whole figure yaws by _bodyYaw; per-bone targets are de-yawed first so the turn is
+    // applied exactly once (no double-rotation). Mirrors ApplyToBones() structure 1:1.
+    void ApplyToBones3D()
+    {
+        if (_animator == null || !_world33Init) return;
+
+        ComputeBodyYaw3D();
+
+        if (armsOnly)
+        {
+            LockBody();
+        }
+        else
+        {
+            TryDriveMidMid3D(HumanBodyBones.Hips,  MP_L_KNEE, MP_R_KNEE, MP_L_HIP, MP_R_HIP, followStrength);
+            TryDriveMidMid3D(HumanBodyBones.Spine, MP_L_HIP, MP_R_HIP, MP_L_SHOULDER, MP_R_SHOULDER, followStrength);
+            TryDriveMidMid3D(HumanBodyBones.Chest, MP_L_SHOULDER, MP_R_SHOULDER, MP_L_EAR, MP_R_EAR, followStrength);
+            TryDriveMid3D  (HumanBodyBones.Neck,  MP_L_SHOULDER, MP_R_SHOULDER, MP_NOSE, followStrength);
+        }
+
+        // Arms — cross-side (selfie/front cam): avatar-Left from MediaPipe-Right and vice versa.
+        TryDrive3D(HumanBodyBones.LeftUpperArm,  MP_R_SHOULDER, MP_R_ELBOW, followStrength);
+        TryDrive3D(HumanBodyBones.LeftLowerArm,  MP_R_ELBOW,    MP_R_WRIST, followStrength);
+        TryDrive3D(HumanBodyBones.RightUpperArm, MP_L_SHOULDER, MP_L_ELBOW, followStrength);
+        TryDrive3D(HumanBodyBones.RightLowerArm, MP_L_ELBOW,    MP_L_WRIST, followStrength);
+
+        if (!armsOnly)
+        {
+            float legStr = followStrength * legSensitivity;
+            TryDrive3D(HumanBodyBones.LeftUpperLeg,  MP_R_HIP,  MP_R_KNEE,  legStr);
+            TryDrive3D(HumanBodyBones.LeftLowerLeg,  MP_R_KNEE, MP_R_ANKLE, legStr);
+            TryDrive3D(HumanBodyBones.RightUpperLeg, MP_L_HIP,  MP_L_KNEE,  legStr);
+            TryDrive3D(HumanBodyBones.RightLowerLeg, MP_L_KNEE, MP_L_ANKLE, legStr);
+            ApplyHipSway(LatestKeypoints, LatestConfidence, minBoneVisibility); // sway still from the stable 2D hip-center
+        }
+    }
+
+    Vector3 World(int i) => new Vector3(_world33[i].x, _world33[i].y, _world33[i].z);
+
+    void TryDrive3D(HumanBodyBones bone, int from, int to, float strength)
+    {
+        if (_world33[from].visibility < minBoneVisibility || _world33[to].visibility < minBoneVisibility) { RestBone(bone); return; }
+        DriveSegment3D(bone, World(from), World(to), strength);
+    }
+
+    void TryDriveMid3D(HumanBodyBones bone, int fromA, int fromB, int to, float strength)
+    {
+        if (_world33[fromA].visibility < minBoneVisibility || _world33[fromB].visibility < minBoneVisibility ||
+            _world33[to].visibility < minBoneVisibility) { RestBone(bone); return; }
+        DriveSegment3D(bone, (World(fromA) + World(fromB)) * 0.5f, World(to), strength);
+    }
+
+    void TryDriveMidMid3D(HumanBodyBones bone, int fromA, int fromB, int toA, int toB, float strength)
+    {
+        if (_world33[fromA].visibility < minBoneVisibility || _world33[fromB].visibility < minBoneVisibility ||
+            _world33[toA].visibility < minBoneVisibility || _world33[toB].visibility < minBoneVisibility) { RestBone(bone); return; }
+        DriveSegment3D(bone, (World(fromA) + World(fromB)) * 0.5f, (World(toA) + World(toB)) * 0.5f, strength);
+    }
+
+    // Build a FULL 3D direction (MediaPipe world axes → Unity, corrected by flipX/Y/Z), de-yaw it so
+    // the whole-body turn (_bodyYaw) isn't double-applied, rotate the bone to match, then re-apply the
+    // body yaw so every driven bone turns together coherently.
+    void DriveSegment3D(HumanBodyBones bone, Vector3 from, Vector3 to, float strength)
+    {
+        if (!_tPoseDir.ContainsKey(bone)) return;
+        Transform t = _animator.GetBoneTransform(bone);
+        if (t == null) return;
+
+        Vector3 d = to - from;
+        float dx = d.x; if (flipX) dx = -dx;
+        float dy = d.y; if (flipY) dy = -dy;
+        float dz = d.z; if (flipZ) dz = -dz;
+        // 2.5D hybrid: MediaPipe's world DEPTH (z) is noisy and makes a side-extended limb point
+        // toward/away from the camera, so from the front view it looks foreshortened + laggy vs the
+        // flat 2D skeleton. Shrink only the per-limb depth (the whole-body turn _bodyYaw stays full,
+        // so side-on poses still turn + score). worldDepthScale=1 → full 3D, 0 → flat like 2D.
+        dz *= worldDepthScale;
+        Vector3 worldTarget = new Vector3(dx, dy, dz);
+        if (worldTarget.sqrMagnitude < 1e-6f) return;
+        Vector3 target = (Quaternion.Inverse(_bodyYaw) * worldTarget).normalized;
+
+        Quaternion full = Quaternion.FromToRotation(_tPoseDir[bone], target) * _tPoseRot[(int)bone];
+        t.rotation = _bodyYaw * Quaternion.Slerp(_tPoseRot[(int)bone], full, strength);
+    }
+
+    // Which way are you facing? Detect it from the skeleton: how far the shoulder line (and hip line)
+    // have rotated OUT of the camera-facing plane. asin(depthGap / span) is 0 when you face the camera
+    // (shoulders span x, no depth gap) and ±90° when you're fully sideways — so REST = 0 (no constant
+    // offset, unlike the old atan2 which read ~90° when Δx was negative on a mirrored cam), and the sign
+    // tells left vs right. Averaged over shoulders + hips for stability. Heavily smoothed + deadzoned.
+    void ComputeBodyYaw3D()
+    {
+        if (!bodyTurn) { _yawDeg = 0f; _bodyYaw = Quaternion.identity; return; }
+
+        float sy = YawFromLine3D(MP_L_SHOULDER, MP_R_SHOULDER);
+        float hy = YawFromLine3D(MP_L_HIP, MP_R_HIP);
+        int n = 0; float sum = 0f;
+        if (!float.IsNaN(sy)) { sum += sy; n++; }
+        if (!float.IsNaN(hy)) { sum += hy; n++; }
+
+        float raw;
+        if (n == 0) raw = 0f; // can't see shoulders or hips → ease back to facing forward
+        else
+        {
+            raw = (sum / n) * bodyTurnGain;
+            if (flipX) raw = -raw;
+            if (bodyTurnInvert) raw = -raw;
+            raw = Mathf.Clamp(raw, -bodyTurnMaxDeg, bodyTurnMaxDeg);
+            if (Mathf.Abs(raw) < bodyTurnDeadzoneDeg) raw = 0f;
+        }
+
+        _yawDeg = Mathf.Lerp(_yawDeg, raw, bodyTurnSmoothing);
+        _bodyYaw = Quaternion.AngleAxis(_yawDeg, Vector3.up);
+    }
+
+    // Facing angle (deg) of a left→right landmark line out of the camera plane: asin(depth / span).
+    // 0 = the line faces the camera, ±90 = edge-on (you're sideways). NaN if an endpoint isn't visible.
+    float YawFromLine3D(int li, int ri)
+    {
+        var l = _world33[li]; var r = _world33[ri];
+        if (l.visibility < minBoneVisibility || r.visibility < minBoneVisibility) return float.NaN;
+        float dx = r.x - l.x;
+        float dz = r.z - l.z;
+        float span = Mathf.Sqrt(dx * dx + dz * dz);
+        return span > 1e-4f ? Mathf.Asin(Mathf.Clamp(dz / span, -1f, 1f)) * Mathf.Rad2Deg : 0f;
     }
 
     // Ease a single bone back toward its rest (bind T-pose) rotation. Used when a joint is

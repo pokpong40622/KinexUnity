@@ -108,3 +108,9 @@ ui_audits/
 /skills-lock.json
 /game-brief.md
 /project-analysis.md
+
+# Local scratch / debug artefacts (not source)
+/_posestudio/
+/_figma_info/
+/dev/
+/Assets/Screenshots.meta
