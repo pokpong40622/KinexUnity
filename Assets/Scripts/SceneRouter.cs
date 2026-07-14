@@ -32,6 +32,18 @@ namespace Kinex.App
                 case "world":
                     SceneManager.LoadScene("KinexWorldScene");
                     break;
+                case "fruitgame":
+                    SceneManager.LoadScene("FruitGameScene");
+                    break;
+                case "balancequest":
+                    SceneManager.LoadScene("BalanceQuestScene");
+                    break;
+                case "battlegame":
+                    SceneManager.LoadScene("BattleGameScene");
+                    break;
+                case "mirrorgame":
+                    SceneManager.LoadScene("MirrorGameScene");
+                    break;
                 default:
                     Debug.LogWarning($"[SceneRouter] Unknown game id: '{gameId}'");
                     break;

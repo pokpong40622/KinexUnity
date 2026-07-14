@@ -80,6 +80,20 @@ namespace Kinex.Trainer
         public int PoseCount => poseData != null && poseData.poses != null ? poseData.poses.Length : 0;
         public int CurrentPose => _currentPose;
 
+        /// <summary>
+        /// Runtime init for a dynamically-instantiated rig that has no Inspector-wired poseData/
+        /// rigRoot (e.g. BattleGame's PoseGhost, spawned entirely from code). Re-resolves bones
+        /// under the given root and snaps straight to a pose — no blend, no flicker on spawn.
+        /// </summary>
+        public void InitRuntime(TrainerPoseData data, Transform newRigRoot, int startPoseIndex = 0)
+        {
+            poseData = data;
+            rigRoot = newRigRoot != null ? newRigRoot : transform;
+            if (_animator == null) _animator = GetComponentInChildren<Animator>();
+            ResolveBones();
+            if (HasData) SnapToPose(startPoseIndex);
+        }
+
         /// <summary>Display name of a pose (e.g. "หมุนศีรษะ • 1/4 (หันซ้าย)"), for the HUD/instruction card.</summary>
         public string PoseName(int index) =>
             (poseData != null && poseData.poses != null && poseData.poses.Length > 0)
