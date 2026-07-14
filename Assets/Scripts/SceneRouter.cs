@@ -44,6 +44,9 @@ namespace Kinex.App
                 case "mirrorgame":
                     SceneManager.LoadScene("MirrorGameScene");
                     break;
+                case "templehunt":
+                    SceneManager.LoadScene("TempleHuntScene");
+                    break;
                 default:
                     Debug.LogWarning($"[SceneRouter] Unknown game id: '{gameId}'");
                     break;
