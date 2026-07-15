@@ -34,3 +34,10 @@ mirror_theme.mp3
   Source: https://opengameart.org/content/lofi-compilation
   Direct: https://opengameart.org/sites/default/files/A%20cup%20of%20tea_0.mp3
   License: CC0
+
+dance_theme.ogg
+  "Funky Disco Beats to Boogie/Woogie to" by Fupi
+  Source: https://opengameart.org/content/funky-disco-beats-to-boogiewoogie-to
+  Direct: https://opengameart.org/sites/default/files/funkydiscobeatstoboogieslashwoogieto_0.ogg
+  License: CC0
+  Used by: SUPERSTAR STAGE (dancestar)
