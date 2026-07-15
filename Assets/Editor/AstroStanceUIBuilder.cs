@@ -1,4 +1,5 @@
 #if UNITY_EDITOR
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UI;
@@ -57,6 +58,21 @@ namespace Kinex.AstroStance.EditorTools
             "ResultsPanel", "CameraFeedPanel", "PreviewToggleButton",
         };
 
+        // ---- sprite-asset lookup (docs/astro_ui_assets.md is the source of truth) ----
+        // Null-safe: the PNGs are produced by a separate stream and may not exist on disk yet.
+        // Every caller must handle a null return by keeping its current procedural look, so the
+        // scene still builds today. Warns once per missing name per build run (not once per call
+        // site) so a chip used 5x doesn't spam 5 identical warnings.
+        static readonly HashSet<string> _warnedMissingSprites = new HashSet<string>();
+
+        static Sprite Ui(string name)
+        {
+            var sprite = AssetDatabase.LoadAssetAtPath<Sprite>("Assets/AstroStance/UI/" + name + ".png");
+            if (sprite == null && _warnedMissingSprites.Add(name))
+                Debug.LogWarning($"[AstroStanceUIBuilder] Sprite not found, using procedural fallback: {name}.png");
+            return sprite;
+        }
+
         [MenuItem("Kinex/Build AstroStance UI")]
         public static void Build() => Debug.Log("[AstroStanceUIBuilder] " + BuildUI());
 
@@ -66,6 +82,7 @@ namespace Kinex.AstroStance.EditorTools
             if (director == null) return "No AstroStanceDirector in the open scene. Run the scene builder first.";
             var canvas = Object.FindAnyObjectByType<Canvas>();
             if (canvas == null) return "No Canvas in scene.";
+            _warnedMissingSprites.Clear();
 
             var thaiBlack = LoadFont(ThaiBlackPath);
             var thaiSemi = LoadFont(ThaiSemiPath);
@@ -86,8 +103,10 @@ namespace Kinex.AstroStance.EditorTools
 
             var ringAccent = AddImage(intro.transform, "TitleRingAccent", knob, new Color(Indigo.r, Indigo.g, Indigo.b, 0.55f));
             Place(ringAccent.rectTransform, 700, 8, 150, 150);
-            var starAccent = AddImage(intro.transform, "TitleStarAccent", knob, Gold);
-            Place(starAccent.rectTransform, 748, 34, 62, 62);
+            var titleStar = Ui("star_lit");
+            var starAccent = AddImage(intro.transform, "TitleStarAccent", titleStar != null ? titleStar : knob,
+                                      titleStar != null ? Color.white : Gold);
+            Place(starAccent.rectTransform, 744, 30, 70, 70);
 
             var titleTop = AddText(intro.transform, "ASTRO", montserratBlack, 100, OffWhite, TextAlignmentOptions.Center);
             Place(titleTop.rectTransform, 0, 58, FW, 118);
@@ -132,9 +151,13 @@ namespace Kinex.AstroStance.EditorTools
                 framingChips[i] = chip;
             }
 
-            var framingHoldTrack = AddImage(framing.transform, "FramingHoldRingTrack", knob, RingTrack);
+            var ringTrackSprite = Ui("ring_track");
+            var ringFillSprite = Ui("ring_fill");
+            var framingHoldTrack = AddImage(framing.transform, "FramingHoldRingTrack",
+                ringTrackSprite != null ? ringTrackSprite : knob, ringTrackSprite != null ? Color.white : RingTrack);
             Place(framingHoldTrack.rectTransform, 404, 680, 120, 120);
-            var framingHoldRing = AddImage(framing.transform, "FramingHoldRingFill", knob, Cyan);
+            var framingHoldRing = AddImage(framing.transform, "FramingHoldRingFill",
+                ringFillSprite != null ? ringFillSprite : knob, ringFillSprite != null ? Color.white : Cyan);
             framingHoldRing.type = Image.Type.Filled;
             framingHoldRing.fillMethod = Image.FillMethod.Radial360;
             framingHoldRing.fillOrigin = (int)Image.Origin360.Top;
@@ -145,9 +168,11 @@ namespace Kinex.AstroStance.EditorTools
             // =================== CALIBRATION (canvas-level sibling — see class doc) ===================
             var calibGroup = NewPanel(canvas.transform, "CalibGroup");
             calibGroup.GetComponent<Image>().color = ScrimDim;
-            var calibTrack = AddImage(calibGroup.transform, "CalibRingTrack", knob, RingTrack);
+            var calibTrack = AddImage(calibGroup.transform, "CalibRingTrack",
+                ringTrackSprite != null ? ringTrackSprite : knob, ringTrackSprite != null ? Color.white : RingTrack);
             Place(calibTrack.rectTransform, 383, 560, 160, 160);
-            var calibRing = AddImage(calibGroup.transform, "CalibRingFill", knob, Cyan);
+            var calibRing = AddImage(calibGroup.transform, "CalibRingFill",
+                ringFillSprite != null ? ringFillSprite : knob, ringFillSprite != null ? Color.white : Cyan);
             calibRing.type = Image.Type.Filled;
             calibRing.fillMethod = Image.FillMethod.Radial360;
             calibRing.fillOrigin = (int)Image.Origin360.Top;
@@ -163,17 +188,19 @@ namespace Kinex.AstroStance.EditorTools
             var hud = NewPanel(canvas.transform, "HudPanel");
 
             // -- Score, top-left. --
-            AddCard(hud.transform, 36, 36, 240, 110);
+            AddChip(hud.transform, 36, 36, 240, 110);
             var scoreStar = AddImage(hud.transform, "ScoreStar", knob, Gold);
             Place(scoreStar.rectTransform, 56, 58, 56, 56);
             var scoreText = AddText(hud.transform, "0", montserratBlack, 64, OffWhite, TextAlignmentOptions.Left);
             Place(scoreText.rectTransform, 122, 52, 140, 82);
 
             // -- Timer, top-center. --
-            AddCard(hud.transform, 343, 36, 240, 110);
-            var timerRingTrack = AddImage(hud.transform, "TimerRingTrack", knob, RingTrack);
+            AddChip(hud.transform, 343, 36, 240, 110);
+            var timerRingTrack = AddImage(hud.transform, "TimerRingTrack",
+                ringTrackSprite != null ? ringTrackSprite : knob, ringTrackSprite != null ? Color.white : RingTrack);
             Place(timerRingTrack.rectTransform, 403, 46, 90, 90);
-            var timerRing = AddImage(hud.transform, "TimerRingFill", knob, Cyan);
+            var timerRing = AddImage(hud.transform, "TimerRingFill",
+                ringFillSprite != null ? ringFillSprite : knob, ringFillSprite != null ? Color.white : Cyan);
             timerRing.type = Image.Type.Filled;
             timerRing.fillMethod = Image.FillMethod.Radial360;
             timerRing.fillOrigin = (int)Image.Origin360.Top;
@@ -185,7 +212,9 @@ namespace Kinex.AstroStance.EditorTools
             Outline(timerText, new Color(0f, 0f, 0f, 0.6f), 0.2f);
 
             // -- Pause round button, top-right. --
-            var pauseBtnImg = AddImage(hud.transform, "PauseButton", knob, GlassBg);
+            var btnRoundSprite = Ui("btn_round");
+            var pauseBtnImg = AddImage(hud.transform, "PauseButton",
+                btnRoundSprite != null ? btnRoundSprite : knob, btnRoundSprite != null ? Color.white : GlassBg);
             pauseBtnImg.raycastTarget = true;
             Place(pauseBtnImg.rectTransform, 795, 36, 96, 96);
             var pauseBtn = pauseBtnImg.gameObject.AddComponent<Button>();
@@ -197,15 +226,32 @@ namespace Kinex.AstroStance.EditorTools
             var laneDots = new Image[3];
             const float dotSize = 36f, dotSpacing = 70f;
             float dotsCenterX = FW * 0.5f;
+            // Director only ever retints .color at runtime (LaneDotOn/Off) — it never swaps
+            // sprites — so all 3 dots share one shape sprite (dot_on's baked rim/fill) and rely
+            // on that tint for the on/off look, same mechanism as before with `knob`.
+            var dotSprite = Ui("dot_on");
             for (int i = 0; i < 3; i++)
             {
                 float cx = dotsCenterX + (i - 1) * dotSpacing - dotSize * 0.5f;
-                var dot = AddImage(hud.transform, $"LaneDot{i}", knob, new Color(1f, 1f, 1f, 0.25f));
+                var dot = AddImage(hud.transform, $"LaneDot{i}", dotSprite != null ? dotSprite : knob, new Color(1f, 1f, 1f, 0.25f));
                 Place(dot.rectTransform, cx, 1290, dotSize, dotSize);
                 laneDots[i] = dot;
             }
 
             // -- Toast, centered. --
+            // The pill sits BEHIND the toast text (added first = earlier sibling = drawn under) and
+            // starts fully transparent: the director owns its alpha via toastBg and fades it in step
+            // with the message text, so nothing is visible between toasts. Optional — with no
+            // toast.png the toast stays text-only, which reads fine against the bright park.
+            var toastSprite = Ui("toast");
+            Image toastBg = null;
+            if (toastSprite != null)
+            {
+                toastBg = AddImage(hud.transform, "ToastBg", toastSprite, new Color(1f, 1f, 1f, 0f));
+                toastBg.type = Image.Type.Sliced;
+                toastBg.raycastTarget = false;
+                Place(toastBg.rectTransform, 64, 495, 799, 100);
+            }
             var toastText = AddText(hud.transform, "", thaiBlack, 64, Gold, TextAlignmentOptions.Center);
             toastText.fontStyle = FontStyles.Bold;
             toastText.raycastTarget = false;
@@ -233,7 +279,7 @@ namespace Kinex.AstroStance.EditorTools
             Place(pauseTitle.rectTransform, 114, 520, 700, 110);
             var resumeBtn = AddPillButton(pause.transform, "ResumeButton", "เล่นต่อ", thaiSemi, Green, Color.white, 197, 660, 260, 110, 42);
             UnityEditor.Events.UnityEventTools.AddPersistentListener(resumeBtn.onClick, director.OnResumePressed);
-            var exitFromPauseBtn = AddPillButton(pause.transform, "ExitFromPauseButton", "ออกจากเกม", thaiSemi, Gray, Color.white, 470, 660, 260, 110, 42);
+            var exitFromPauseBtn = AddPillButton(pause.transform, "ExitFromPauseButton", "ออกจากเกม", thaiSemi, Gray, Color.white, 470, 660, 260, 110, 42, secondary: true);
             UnityEditor.Events.UnityEventTools.AddPersistentListener(exitFromPauseBtn.onClick, director.OnExitPressed);
 
             // =================== RESULTS ===================
@@ -253,9 +299,13 @@ namespace Kinex.AstroStance.EditorTools
             const float starSize = 96f, starGap = 24f;
             float starsTotalW = 3 * starSize + 2 * starGap;
             float starStartX = (FW - starsTotalW) * 0.5f;
+            // Same story as the lane dots: the director only retints .color (StarLit/StarDim), it
+            // never swaps sprites, so all 3 stars share star_lit's shape and the runtime tint does
+            // the lit/dim differentiation (star_dim.png is unused while that's true — flagged for review).
+            var starSprite = Ui("star_lit");
             for (int i = 0; i < 3; i++)
             {
-                var star = AddImage(results.transform, $"ResultStar{i}", knob, new Color(0.14f, 0.20f, 0.12f, 0.18f));
+                var star = AddImage(results.transform, $"ResultStar{i}", starSprite != null ? starSprite : knob, new Color(0.14f, 0.20f, 0.12f, 0.18f));
                 Place(star.rectTransform, starStartX + i * (starSize + starGap), 540, starSize, starSize);
                 resultStars[i] = star;
             }
@@ -271,11 +321,16 @@ namespace Kinex.AstroStance.EditorTools
                 ("ลุก-นั่ง", OffWhite),
                 ("ก้าวข้าง", IndigoLight),
             };
+            // Icon per row, in repRows order (สมบัติ/เตะ/หลบ/ลุก-นั่ง/ก้าว) — these Images are build-time
+            // only (never touched by the director afterward), so unlike stars/dots we can safely
+            // give each row its own distinct icon sprite instead of one shared shape.
+            string[] repIconSprites = { "icon_treasure", "icon_kick", "icon_dodge", "icon_sit", "icon_step" };
             var resultRepValues = new TMP_Text[5];
             for (int i = 0; i < repRows.Length; i++)
             {
                 float ry = 700 + i * 84;
-                var icon = AddImage(results.transform, $"RepIcon{i}", knob, repRows[i].color);
+                var iconSprite = Ui(repIconSprites[i]);
+                var icon = AddImage(results.transform, $"RepIcon{i}", iconSprite != null ? iconSprite : knob, iconSprite != null ? Color.white : repRows[i].color);
                 Place(icon.rectTransform, 110, ry, 44, 44);
                 var label = AddText(results.transform, repRows[i].label, thaiSemi, 38, OffWhite, TextAlignmentOptions.Left);
                 Place(label.rectTransform, 170, ry - 4, 400, 52);
@@ -286,7 +341,7 @@ namespace Kinex.AstroStance.EditorTools
 
             var playAgainBtn = AddPillButton(results.transform, "PlayAgainButton", "เล่นอีกครั้ง", thaiSemi, Cyan, Color.white, 150, 1210, 300, 110, 42);
             UnityEditor.Events.UnityEventTools.AddPersistentListener(playAgainBtn.onClick, director.OnPlayAgainPressed);
-            var exitFromResultsBtn = AddPillButton(results.transform, "ExitFromResultsButton", "กลับหน้าหลัก", thaiSemi, Gray, Color.white, 480, 1210, 300, 110, 42);
+            var exitFromResultsBtn = AddPillButton(results.transform, "ExitFromResultsButton", "กลับหน้าหลัก", thaiSemi, Gray, Color.white, 480, 1210, 300, 110, 42, secondary: true);
             UnityEditor.Events.UnityEventTools.AddPersistentListener(exitFromResultsBtn.onClick, director.OnExitPressed);
 
             feedPanel.transform.SetAsLastSibling();
@@ -310,6 +365,7 @@ namespace Kinex.AstroStance.EditorTools
             Assign(so, "timerText", timerText);
             Assign(so, "timerRing", timerRing);
             Assign(so, "toastText", toastText);
+            Assign(so, "toastBg", toastBg);
             Assign(so, "countdownText", countdownText);
             Assign(so, "resultScoreText", resultScoreText);
 
@@ -349,6 +405,11 @@ namespace Kinex.AstroStance.EditorTools
                 "เตะวงแหวนจากเลนข้าง ๆ",
             };
 
+            // One designed icon per card (step aside / sit-to-stand / kick). PNG-first per the
+            // image-only UI direction; the procedural pictogram below is only a fallback for a
+            // missing sprite so the intro still builds.
+            string[] icons = { "icon_step", "icon_sit", "icon_kick" };
+
             for (int i = 0; i < 3; i++)
             {
                 float x = xs[i];
@@ -357,7 +418,14 @@ namespace Kinex.AstroStance.EditorTools
                 // wrong — anchors are fractions of the PARENT rect.
                 AddCard(parent, x, cardY, cardW, cardH);
 
-                switch (i)
+                var icon = Ui(icons[i]);
+                if (icon != null)
+                {
+                    const float iconSize = 130f;
+                    var img = AddImage(parent, "Picto", icon, Color.white);
+                    Place(img.rectTransform, x + (cardW - iconSize) / 2f, cardY + 40, iconSize, iconSize);
+                }
+                else switch (i)
                 {
                     case 0: // side-step: person dot + left/right arrow bars
                         AddPictoDot(parent, knob, OffWhite, x + 105, cardY + 60, 60);
@@ -430,6 +498,17 @@ namespace Kinex.AstroStance.EditorTools
             overlay.source = detector;
             overlay.confidenceColors = true;
 
+            // feed_frame.png draws OVER the RawImage (transparent centre + leaf rim + shadow), added
+            // last so it's the top sibling. Null-safe: if it's not built yet the plain GlassBg
+            // backdrop (panelImg above) is the only frame, same as before.
+            var frameSprite = Ui("feed_frame");
+            if (frameSprite != null)
+            {
+                var frame = AddImage(panelRt, "FeedFrame", frameSprite, Color.white);
+                frame.type = Image.Type.Sliced;
+                Stretch(frame.rectTransform);
+            }
+
             return panelGo;
         }
 
@@ -476,29 +555,73 @@ namespace Kinex.AstroStance.EditorTools
 
         static GameObject AddCard(Transform parent, float x, float y, float w, float h)
         {
+            var sprite = Ui("card_cream");
+            if (sprite != null)
+            {
+                // card_cream.png already bakes in the rim + soft ambient shadow — no procedural
+                // rim/Shadow needed on top of it.
+                var img = AddImage(parent, "Card", sprite, Color.white);
+                img.type = Image.Type.Sliced;
+                Place(img.rectTransform, x, y, w, h);
+                return img.gameObject;
+            }
+            // Fallback while card_cream.png isn't built yet: original procedural rim + fill + shadow.
             // Faint leaf-green rim first (a slightly larger card behind), then the cream fill on top —
             // gives every card a visible edge against the bright park stage without a real 9-slice border.
             var rim = AddImage(parent, "CardRim", null, CardRim);
             Round(rim);
             Place(rim.rectTransform, x - 2f, y - 2f, w + 4f, h + 4f);
 
-            var img = AddImage(parent, "Card", null, GlassBg);
-            Round(img);
-            var shadow = img.gameObject.AddComponent<Shadow>();
+            var card = AddImage(parent, "Card", null, GlassBg);
+            Round(card);
+            var shadow = card.gameObject.AddComponent<Shadow>();
             shadow.effectColor = new Color(0f, 0f, 0f, 0.45f);
             shadow.effectDistance = new Vector2(0, 6);
+            Place(card.rectTransform, x, y, w, h);
+            return card.gameObject;
+        }
+
+        // HUD score/timer background — smaller than a card, uses chip.png (contract: "HUD chips").
+        static Image AddChip(Transform parent, float x, float y, float w, float h)
+        {
+            var sprite = Ui("chip");
+            Image img;
+            if (sprite != null)
+            {
+                img = AddImage(parent, "Chip", sprite, Color.white);
+                img.type = Image.Type.Sliced;
+            }
+            else
+            {
+                img = AddImage(parent, "Chip", null, GlassBg); // fallback: same look as AddCard's fallback
+                Round(img);
+            }
             Place(img.rectTransform, x, y, w, h);
-            return img.gameObject;
+            return img;
         }
 
         static Button AddPillButton(Transform parent, string name, string label, TMP_FontAsset font,
-                                    Color bg, Color textColor, float x, float y, float w, float h, float labelSize)
+                                    Color bg, Color textColor, float x, float y, float w, float h, float labelSize,
+                                    bool secondary = false)
         {
-            var img = AddImage(parent, name, null, bg);
-            Round(img);
+            var sprite = Ui(secondary ? "btn_secondary" : "btn_primary");
+            var img = AddImage(parent, name, sprite, sprite != null ? Color.white : bg);
+            if (sprite != null) img.type = Image.Type.Sliced;
+            else Round(img); // fallback: procedural pill, keep the caller's tint
             img.raycastTarget = true;
             Place(img.rectTransform, x, y, w, h);
             var btn = img.gameObject.AddComponent<Button>();
+            if (!secondary && sprite != null) // only wire a pressed sprite once the normal one is real art
+            {
+                var pressedSprite = Ui("btn_primary_down");
+                if (pressedSprite != null)
+                {
+                    btn.transition = Selectable.Transition.SpriteSwap;
+                    var state = btn.spriteState;
+                    state.pressedSprite = pressedSprite;
+                    btn.spriteState = state;
+                }
+            }
             var text = AddText(img.transform, label, font, labelSize, textColor, TextAlignmentOptions.Center);
             text.fontStyle = FontStyles.Bold;
             Stretch(text.rectTransform);
@@ -508,7 +631,8 @@ namespace Kinex.AstroStance.EditorTools
         static Button AddRoundButton(Transform parent, string name, Color bg, float x, float y, float size)
         {
             var knob = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/Knob.psd");
-            var img = AddImage(parent, name, knob, bg);
+            var sprite = Ui("btn_round");
+            var img = AddImage(parent, name, sprite != null ? sprite : knob, sprite != null ? Color.white : bg);
             img.raycastTarget = true;
             Place(img.rectTransform, x, y, size, size);
             return img.gameObject.AddComponent<Button>();

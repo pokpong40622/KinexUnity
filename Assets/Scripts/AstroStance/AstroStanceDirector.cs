@@ -46,7 +46,7 @@ namespace Kinex.AstroStance
         [Tooltip("How far the avatar's hips drop (metres) while the sit is held. Paired with the " +
                  "scripted knee bend below so the feet stay planted — together they read as a real " +
                  "crouch to pick up the tool. 0 = no dip.")]
-        public float sitDipMeters = 0.46f;
+        public float sitDipMeters = 0.20f;
         [Tooltip("Seconds for the sit crouch to fully ease in/out. Lower = snappier.")]
         public float sitDipSeconds = 0.35f;
 
@@ -86,6 +86,8 @@ namespace Kinex.AstroStance
         public TMP_Text timerText;
         public Image timerRing;
         public TMP_Text toastText;
+        [Tooltip("Optional pill behind the toast text. Fades in/out with the message — leave null for text-only.")]
+        public Image toastBg;
         [Tooltip("3 lane indicator dots, left→right.")]
         public Image[] laneDots = new Image[3];
         public TMP_Text countdownText;
@@ -149,6 +151,7 @@ namespace Kinex.AstroStance
         float[] _crouchTarget;
         int _lastLane;
         GameObject _tool;
+        bool _claimPending; // sat over a treasure, tool grabbed — collect once the crouch bottoms out
         AstroResult _result = new AstroResult();
 
         float _bodyLostTimer; // seconds every joint group has been MISSING (drives the play→framing bounce)
@@ -214,6 +217,7 @@ namespace Kinex.AstroStance
             if (avatarRoot != null) { _avatarBaseX = avatarRoot.position.x; _avatarBaseY = avatarRoot.position.y; }
             _timeLeft = sessionSeconds;
             if (toastText != null) toastText.text = "";
+            SetToastBgAlpha(0f); // no message yet — the pill starts invisible
             if (spawner != null)
             {
                 spawner.ItemArrived += OnItemArrived;
@@ -221,6 +225,7 @@ namespace Kinex.AstroStance
             }
             ShowOnly(introPanel);
             if (hudPanel != null) hudPanel.SetActive(false);
+            SetPreviewVisible(false); // hide the camera preview until the player presses Start
             UpdateScoreText();
             UpdateTimerText();
         }
@@ -271,6 +276,7 @@ namespace Kinex.AstroStance
             if (framingPanel != null) framingPanel.SetActive(true);
             if (calibGroup != null) calibGroup.SetActive(false);
             if (introPanel != null) introPanel.SetActive(false);
+            SetPreviewVisible(true); // the run has begun — show the live camera preview from here on
             if (_runStarted && spawner != null) spawner.SetPaused(true);
         }
 
@@ -437,17 +443,39 @@ namespace Kinex.AstroStance
             {
                 _satThisRep = true;
                 _sitHeld = true; // drives the visible crouch until the next stand
+                // Sit down over a treasure that landed in this lane: grab the tool now. The actual
+                // pickup happens once the crouch bottoms out (below) so the character is visibly
+                // seated and reaching the floor before the treasure is claimed.
                 var treasure = spawner != null ? spawner.ActiveItem(AstroKind.Treasure, PlayerLane) : null;
                 if (treasure != null && _tool == null)
                 {
                     AttachTool();
-                    ShowToast("หยิบเครื่องมือ!", ToastCyan);
+                    _claimPending = true;
+                    ShowToast("นั่งลงหยิบสมบัติ!", ToastCyan);
+                }
+            }
+
+            // Claim at the bottom of the sit — the character has now reached the treasure on the
+            // floor. Collect it while STILL SEATED; standing back up just drops the tool.
+            if (_claimPending && _sitDip01 >= 0.85f)
+            {
+                _claimPending = false;
+                var treasure = spawner != null ? spawner.ActiveItem(AstroKind.Treasure, PlayerLane) : null;
+                if (treasure != null)
+                {
+                    treasure.Collect(avatarRoot);
+                    _result.treasures++;
+                    _result.score++;
+                    UpdateScoreText();
+                    ShowToast("+1 เก็บสมบัติ!", ToastGold);
+                    Kinex.Sfx.Play("coin", 0.8f);
                 }
             }
 
             if (JustStood)
             {
                 _sitHeld = false; // stood up → release the crouch (avatar eases back upright)
+                _claimPending = false;
                 // A real rep always has a preceding sit. SitStandDetector boots in Seated with a
                 // standing baseline, so it emits one synthetic JustStood shortly after calibration
                 // — which lands during the Countdown (stands ignored there) OR, if the body wasn't
@@ -457,17 +485,7 @@ namespace Kinex.AstroStance
                 if (!_satThisRep) return;
                 _satThisRep = false;
                 _result.sitStands++;
-                var treasure = spawner != null ? spawner.ActiveItem(AstroKind.Treasure, PlayerLane) : null;
-                if (_tool != null && treasure != null)
-                {
-                    treasure.Collect(avatarRoot);
-                    _result.treasures++;
-                    _result.score++;
-                    UpdateScoreText();
-                    ShowToast("+1 เก็บสมบัติ!", ToastGold);
-                    Kinex.Sfx.Play("coin", 0.8f);
-                }
-                if (_tool != null) DropTool();
+                if (_tool != null) DropTool(); // stood up → let the tool fall back to the ground
             }
         }
 
@@ -511,13 +529,14 @@ namespace Kinex.AstroStance
         {
             var names = HumanTrait.MuscleName;
             System.Func<string, int> mi = s => { for (int i = 0; i < names.Length; i++) if (names[i] == s) return i; return -1; };
-            // A normal seated posture (sit-on-a-chair): thighs up toward horizontal, knees ~90°
-            // (shins vertical), torso upright. Not a deep forward squat.
+            // A gentle crouch to pick the treasure off the floor (behind-view): thighs partway
+            // forward, a mild knee bend so the feet stay planted (a deeper fold tucks the shins up
+            // behind = a kneel), and a slight forward spine so the character reads as reaching down.
             var map = new (string name, float val)[]
             {
-                ("Left Upper Leg Front-Back", 0.95f), ("Right Upper Leg Front-Back", 0.95f),
-                ("Left Lower Leg Stretch", -0.85f),   ("Right Lower Leg Stretch", -0.85f),
-                ("Spine Front-Back", 0.0f),
+                ("Left Upper Leg Front-Back", 0.45f), ("Right Upper Leg Front-Back", 0.45f),
+                ("Left Lower Leg Stretch", -0.35f),   ("Right Lower Leg Stretch", -0.35f),
+                ("Spine Front-Back", 0.12f),
             };
             _crouchMuscle = new int[map.Length];
             _crouchTarget = new float[map.Length];
@@ -701,11 +720,23 @@ namespace Kinex.AstroStance
             if (toastText == null || _toastTimer <= 0f) return;
             _toastTimer -= dt;
             float t = Mathf.Clamp01(_toastTimer / ToastSeconds);
+            float a = Mathf.SmoothStep(0f, 1f, t);
             var c = toastText.color;
-            c.a = Mathf.SmoothStep(0f, 1f, t);
+            c.a = a;
             toastText.color = c;
             toastText.transform.localScale = Vector3.one * (1f + 0.12f * Mathf.SmoothStep(0f, 1f, t) * t);
+            SetToastBgAlpha(a); // the pill rides the text's fade, so it only shows during a message
             if (_toastTimer <= 0f) toastText.text = "";
+        }
+
+        // The toast pill is a plain Image the director never enables/disables — it lives at alpha 0 and
+        // is faded in only while a message is up. Null when the UI is text-only (no toast sprite).
+        void SetToastBgAlpha(float a)
+        {
+            if (toastBg == null) return;
+            var c = toastBg.color;
+            c.a = a;
+            toastBg.color = c;
         }
 
         void ShowOnly(GameObject panel)
@@ -743,6 +774,22 @@ namespace Kinex.AstroStance
         public void OnTogglePreviewPressed()
         {
             if (cameraPreviewPanel != null) cameraPreviewPanel.SetActive(!cameraPreviewPanel.activeSelf);
+        }
+
+        // Show/hide the camera preview + its toggle WITHOUT deactivating the panel: the detector binds
+        // the feed's RawImage via FindAnyObjectByType (inactive objects are skipped), so the panel must
+        // stay active for that bind to happen. A CanvasGroup hides it visually instead. The toggle
+        // button plays no part in the bind, so it can be deactivated outright.
+        void SetPreviewVisible(bool show)
+        {
+            if (cameraPreviewPanel != null)
+            {
+                var cg = cameraPreviewPanel.GetComponent<CanvasGroup>();
+                if (cg == null) cg = cameraPreviewPanel.AddComponent<CanvasGroup>();
+                cg.alpha = show ? 1f : 0f;
+                cg.blocksRaycasts = show;
+            }
+            if (previewToggleButton != null) previewToggleButton.SetActive(show);
         }
 
         public void OnPlayAgainPressed()

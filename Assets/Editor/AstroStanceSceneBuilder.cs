@@ -277,7 +277,10 @@ namespace Kinex.AstroStance.EditorTools
             DestroyColliderSafe(floor);
             floor.transform.SetParent(parent, false);
             floor.transform.localPosition = Vector3.zero;
-            floor.transform.localScale = new Vector3(2.4f, 1f, 2.4f); // 10 * 2.4 = 24m
+            // Big enough that its far edge (10 * 54 / 2 = 270m) sits past the fog end (260m), so the
+            // ground fades fully into the sky instead of ending in a hard horizon line over the void.
+            // (Was 24m — its edge fell short of fogStart at 40m, which is why the land looked cut off.)
+            floor.transform.localScale = new Vector3(54f, 1f, 54f);
             floor.GetComponent<Renderer>().sharedMaterial = PropMeshes.MatUnlit(GrassBase);
             NoShadow(floor);
 
@@ -326,6 +329,7 @@ namespace Kinex.AstroStance.EditorTools
 
             BuildSun(parent);
             BuildClouds(parent);
+            BuildDistantScenery(parent);
             BuildSideScenery(parent);
             BuildPollen(parent);
 
@@ -390,6 +394,37 @@ namespace Kinex.AstroStance.EditorTools
             puff.transform.localScale = new Vector3(size, size * 0.5f, size * 0.7f);
             puff.GetComponent<Renderer>().sharedMaterial = mat;
             NoShadow(puff);
+        }
+
+        // Rolling hills across the far distance so the horizon reads as receding meadow, not a flat
+        // green field meeting the void. Flattened spheres sunk into the ground so only soft caps show;
+        // partial fog (they sit at z 55-105, inside fogStart 40) hazes them toward the sky for depth.
+        static void BuildDistantScenery(Transform parent)
+        {
+            var hillNear = PropMeshes.MatUnlit(new Color(0.38f, 0.54f, 0.34f));
+            var hillFar = PropMeshes.MatUnlit(new Color(0.45f, 0.60f, 0.42f));
+            // x, z, width, height
+            (float x, float z, float w, float h)[] hills =
+            {
+                (-95f, 78f, 130f, 26f), (55f, 92f, 160f, 34f), (150f, 84f, 120f, 24f),
+                (-190f, 96f, 180f, 30f), (5f, 62f, 90f, 16f),  (-40f, 70f, 80f, 14f),
+                (100f, 66f, 90f, 15f),
+            };
+            for (int i = 0; i < hills.Length; i++)
+            {
+                var h = hills[i];
+                var hill = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                hill.name = "Hill";
+                DestroyColliderSafe(hill);
+                hill.transform.SetParent(parent, false);
+                // Sink the sphere so only a rounded ridge pokes above the grass. The sphere's radius
+                // is h/2, so a sink of 0.15·h leaves a cap ~0.35·h tall above y=0 (a sink ≥0.5·h would
+                // bury it completely — the earlier 0.62·h did exactly that, hiding every hill).
+                hill.transform.localPosition = new Vector3(h.x, -h.h * 0.15f, h.z);
+                hill.transform.localScale = new Vector3(h.w, h.h, h.w * 0.7f);
+                hill.GetComponent<Renderer>().sharedMaterial = (i % 2 == 0) ? hillNear : hillFar;
+                NoShadow(hill);
+            }
         }
 
         // Roadside trees framing both sides of the lanes, receding into the distance. Index-based

@@ -1,0 +1,25 @@
+{
+  "pixelsPerUnit": 200,
+  "sprites": [
+    { "file": "card_cream.png", "border": [56, 56, 56, 56] },
+    { "file": "card_glass.png", "border": [56, 56, 56, 56] },
+    { "file": "btn_primary.png", "border": [60, 52, 60, 52] },
+    { "file": "btn_primary_down.png", "border": [60, 52, 60, 52] },
+    { "file": "btn_secondary.png", "border": [60, 52, 60, 52] },
+    { "file": "btn_round.png", "border": [0, 0, 0, 0] },
+    { "file": "chip.png", "border": [44, 40, 44, 40] },
+    { "file": "toast.png", "border": [44, 40, 44, 40] },
+    { "file": "star_lit.png", "border": [0, 0, 0, 0] },
+    { "file": "star_dim.png", "border": [0, 0, 0, 0] },
+    { "file": "dot_on.png", "border": [0, 0, 0, 0] },
+    { "file": "dot_off.png", "border": [0, 0, 0, 0] },
+    { "file": "ring_track.png", "border": [0, 0, 0, 0] },
+    { "file": "ring_fill.png", "border": [0, 0, 0, 0] },
+    { "file": "feed_frame.png", "border": [56, 56, 56, 56] },
+    { "file": "icon_treasure.png", "border": [0, 0, 0, 0] },
+    { "file": "icon_kick.png", "border": [0, 0, 0, 0] },
+    { "file": "icon_dodge.png", "border": [0, 0, 0, 0] },
+    { "file": "icon_sit.png", "border": [0, 0, 0, 0] },
+    { "file": "icon_step.png", "border": [0, 0, 0, 0] }
+  ]
+}
