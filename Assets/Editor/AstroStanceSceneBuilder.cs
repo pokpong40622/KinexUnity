@@ -40,11 +40,11 @@ namespace Kinex.AstroStance.EditorTools
         const int ShotW = 927, ShotH = 1427;
         const float AvatarHeightMeters = 1.7f;
 
-        // Palette shared with AstroStanceUIBuilder / AstroProps where it overlaps.
-        static readonly Color NearBlackBg = new Color(0.0196f, 0.0235f, 0.0588f); // #05060F
-        static readonly Color FloorNavy = new Color(0.0431f, 0.0588f, 0.1176f);   // #0B0F1E
-        static readonly Color LaneIndigo = new Color(0.0784f, 0.1020f, 0.2000f);  // #141A33
-        static readonly Color SkyIndigo = new Color(0.1647f, 0.1294f, 0.3765f);   // #2A2160
+        // Palette — sunny-park daylight (re-theme from the original dark space look).
+        static readonly Color SkyPale = new Color(0.74f, 0.86f, 0.96f);   // bright hazy-blue horizon / camera bg
+        static readonly Color GrassBase = new Color(0.33f, 0.53f, 0.24f); // ground plane
+        static readonly Color LaneGrass = new Color(0.46f, 0.66f, 0.33f); // mown lane strips (lighter)
+        static readonly Color SkyTop = new Color(0.35f, 0.60f, 0.90f);    // dome zenith blue
 
         static readonly string[] OwnedRoots =
         {
@@ -76,8 +76,8 @@ namespace Kinex.AstroStance.EditorTools
             cam.nearClipPlane = 0.1f;
             cam.farClipPlane = 300f;
             cam.clearFlags = CameraClearFlags.SolidColor;
-            cam.backgroundColor = NearBlackBg;
-            cam.allowHDR = true; // lane edges / rings / bloom rely on HDR values clearing the bloom threshold
+            cam.backgroundColor = SkyPale;
+            cam.allowHDR = true; // sun disc / emissive lane lines rely on HDR values clearing the bloom threshold
             camGo.AddComponent<AudioListener>();
             cam.GetUniversalAdditionalCameraData().renderPostProcessing = true;
 
@@ -87,25 +87,25 @@ namespace Kinex.AstroStance.EditorTools
             var keyGo = new GameObject("KeyLight");
             var key = keyGo.AddComponent<Light>();
             key.type = LightType.Directional;
-            key.intensity = 1.3f;
-            key.color = new Color(0.85f, 0.90f, 1.0f);
-            keyGo.transform.rotation = Quaternion.Euler(50f, -25f, 0f);
+            key.intensity = 1.45f;
+            key.color = new Color(1.0f, 0.97f, 0.88f); // warm sunlight
+            keyGo.transform.rotation = Quaternion.Euler(48f, -28f, 0f);
             key.shadows = LightShadows.Soft;
-            key.shadowStrength = 0.6f;
+            key.shadowStrength = 0.45f;
 
             var fillGo = new GameObject("FillLight");
             var fill = fillGo.AddComponent<Light>();
             fill.type = LightType.Point;
-            fill.color = new Color(0.55f, 0.72f, 1f);
-            fill.intensity = 2.0f;
-            fill.range = 9f;
+            fill.color = new Color(0.78f, 0.86f, 1f); // soft sky fill
+            fill.intensity = 0.9f;
+            fill.range = 12f;
             fillGo.transform.position = new Vector3(0f, 2.0f, -3.2f);
 
             var rimGo = new GameObject("RimLight");
             var rim = rimGo.AddComponent<Light>();
             rim.type = LightType.Directional;
-            rim.color = new Color(0.9f, 0.85f, 1.0f);
-            rim.intensity = 0.9f;
+            rim.color = new Color(1.0f, 0.96f, 0.86f);
+            rim.intensity = 0.5f;
             rim.shadows = LightShadows.None;
             rimGo.transform.rotation = Quaternion.Euler(20f, 180f, 0f);
 
@@ -157,7 +157,7 @@ namespace Kinex.AstroStance.EditorTools
                 // Give every default-grey body part a deliberate tone (else the body renders grey).
                 var skinTone = new Color(0.86f, 0.67f, 0.53f);
                 var hairTone = new Color(0.22f, 0.14f, 0.10f);
-                var shirtTone = new Color(0.30f, 0.34f, 0.52f);  // cool spacer blue, fits the sci-fi stage
+                var shirtTone = new Color(0.26f, 0.58f, 0.82f);  // bright friendly sky-blue
                 var pantsTone = new Color(0.18f, 0.19f, 0.26f);
                 var shoeTone = new Color(0.70f, 0.74f, 0.82f);
                 ApplyBodyMaterial(model, "mat", skinTone, 0.28f, "SkinFace");
@@ -213,6 +213,12 @@ namespace Kinex.AstroStance.EditorTools
             director.shakeTarget = camGo.transform;
             EditorUtility.SetDirty(director);
 
+            // ---- Editor-only numpad clip switcher for Play-mode pose testing (see
+            // AstroTestClipSwitcher). Child of Director so it isn't a new scene root. ----
+            var switchGo = new GameObject("TestClipSwitcher");
+            switchGo.transform.SetParent(directorGo.transform, false);
+            switchGo.AddComponent<AstroTestClipSwitcher>().detector = detector;
+
             // ---- UI (chained, like the other game builders). ----
             Debug.Log("[Builder] " + AstroStanceUIBuilder.BuildUI());
 
@@ -246,17 +252,23 @@ namespace Kinex.AstroStance.EditorTools
             Debug.Log($"[AstroStanceSceneBuilder] Scene built + saved: {ScenePath}. Screenshot: {ScreenshotPath}");
         }
 
-        // ---- AstroStage: dark floor, 3 glowing lane strips w/ cyan edges, hex landing pads,
-        // sky dome, drifting starfield, a stylized ringed planet + moon on the skyline. ----
+        // ---- ParkStage: grass floor, 3 mown lane strips w/ cream edges, sandy landing pads,
+        // bright sky dome, a warm sun, drifting clouds, roadside trees, pollen + butterflies. ----
         static void BuildAstroStage(Transform parent)
         {
-            var sky = ProceduralSkybox.CreateSkyDome(top: SkyIndigo, horizon: NearBlackBg, radius: 120f);
+            var sky = ProceduralSkybox.CreateSkyDome(top: SkyTop, horizon: SkyPale, radius: 120f);
             sky.transform.SetParent(parent, false);
             ProceduralSkybox.SetAmbient(
-                sky: new Color(0.10f, 0.09f, 0.20f),
-                equator: new Color(0.06f, 0.07f, 0.14f),
-                ground: new Color(0.02f, 0.02f, 0.05f));
-            RenderSettings.fog = false;
+                sky: new Color(0.60f, 0.70f, 0.82f),
+                equator: new Color(0.58f, 0.60f, 0.54f),
+                ground: new Color(0.32f, 0.38f, 0.24f));
+            // Light outdoor haze so far trees / sky decor melt into the horizon (depth + hides the
+            // dome seam). Kept faint + far so the sun and clouds still read crisply.
+            RenderSettings.fog = true;
+            RenderSettings.fogMode = FogMode.Linear;
+            RenderSettings.fogColor = SkyPale;
+            RenderSettings.fogStartDistance = 40f;
+            RenderSettings.fogEndDistance = 260f;
 
             // Floor: Plane primitive is already 10x10 facing +Y — no rotation needed. Unlit:
             // URP/Lit blows out large flat surfaces white (memory: PropMeshes.MatUnlit doc).
@@ -266,16 +278,17 @@ namespace Kinex.AstroStance.EditorTools
             floor.transform.SetParent(parent, false);
             floor.transform.localPosition = Vector3.zero;
             floor.transform.localScale = new Vector3(2.4f, 1f, 2.4f); // 10 * 2.4 = 24m
-            floor.GetComponent<Renderer>().sharedMaterial = PropMeshes.MatUnlit(FloorNavy);
+            floor.GetComponent<Renderer>().sharedMaterial = PropMeshes.MatUnlit(GrassBase);
             NoShadow(floor);
 
-            // 3 lanes, cyan-edged, with a hex landing pad each.
-            var laneMat = PropMeshes.MatUnlit(LaneIndigo);
-            var edgeMat = PropMeshes.Mat(AstroProps.CyanGlow, 0f, 0.4f, AstroProps.CyanGlow * 2.5f);
-            var padMat = PropMeshes.MatUnlit(new Color(0.06f, 0.07f, 0.13f));
-            const float laneWidth = 1.1f, laneZ0 = -0.8f, laneZ1 = 7.2f;
+            // 3 mown lanes, cream-lined, with a sandy landing patch each.
+            var laneMat = PropMeshes.MatUnlit(LaneGrass);
+            // Soft cream lane lines (was neon cyan) — mild emission so they still read in daylight.
+            var edgeMat = PropMeshes.Mat(new Color(0.96f, 0.97f, 0.88f), 0f, 0.2f, new Color(0.30f, 0.31f, 0.26f));
+            var padMat = PropMeshes.MatUnlit(new Color(0.66f, 0.58f, 0.42f)); // sandy landing patch
+            const float laneWidth = 0.92f, laneZ0 = -0.8f, laneZ1 = 7.2f;
             float laneLen = laneZ1 - laneZ0, laneCenterZ = (laneZ0 + laneZ1) * 0.5f;
-            float[] laneXs = { -1.5f, 0f, 1.5f };
+            float[] laneXs = { -1.0f, 0f, 1.0f }; // must match AstroSpawner.laneSpacing
             foreach (var x in laneXs)
             {
                 var strip = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -311,95 +324,125 @@ namespace Kinex.AstroStance.EditorTools
                 BuildRing(parent, "PadRim", new Vector3(x, 0.017f, 1.8f), Quaternion.identity, 0.6f, 0.045f, 16, edgeMat);
             }
 
-            BuildStarfield(parent);
+            BuildSun(parent);
+            BuildClouds(parent);
+            BuildSideScenery(parent);
+            BuildPollen(parent);
 
-            // Stylized ringed planet — SKYLINE ACCENT upper-left, far back, framing without
-            // fighting the HUD. Prefer the Meshy planet_decor model; fall back to a self-lit
-            // purple sphere + snug ring if the model isn't imported.
-            var planetCenter = new Vector3(-21f, 23f, 102f);
-            var planetModel = LoadStageModel("planet_decor", 18f);
-            if (planetModel != null)
-            {
-                planetModel.transform.SetParent(parent, false);
-                planetModel.transform.localPosition = planetCenter;
-                planetModel.transform.localRotation = Quaternion.Euler(15f, 25f, 12f);
-                foreach (var r in planetModel.GetComponentsInChildren<Renderer>()) NoShadowR(r);
-            }
-            else
-            {
-                var planetColor = new Color(0.34f, 0.16f, 0.52f);
-                var planetMat = PropMeshes.Mat(planetColor, 0f, 0.3f, planetColor * 0.75f);
-                var planet = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-                planet.name = "Planet";
-                DestroyColliderSafe(planet);
-                planet.transform.SetParent(parent, false);
-                planet.transform.localPosition = planetCenter;
-                planet.transform.localScale = Vector3.one * 12f;
-                planet.GetComponent<Renderer>().sharedMaterial = planetMat;
-                NoShadow(planet);
-
-                var bandColor = new Color(0.62f, 0.42f, 0.85f);
-                var bandMat = PropMeshes.Mat(bandColor, 0f, 0.4f, bandColor * 1.6f);
-                var band = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-                band.name = "PlanetBand";
-                DestroyColliderSafe(band);
-                band.transform.SetParent(planet.transform, false);
-                band.transform.localScale = new Vector3(1.03f, 0.16f, 1.03f);
-                band.transform.localRotation = Quaternion.Euler(8f, 0f, 12f);
-                band.GetComponent<Renderer>().sharedMaterial = bandMat;
-                NoShadow(band);
-
-                var ringMat = PropMeshes.Mat(bandColor, 0f, 0.4f, bandColor * 1.7f);
-                BuildRing(parent, "PlanetRing", planetCenter, Quaternion.Euler(78f, 0f, 18f), 9f, 0.35f, 40, ringMat);
-            }
-
-            // Small pale moon, upper-right, far — a quiet counter-accent (kept small so it never
-            // competes with the timer/pause HUD on that side).
-            var moonColor = new Color(0.82f, 0.80f, 0.92f);
-            var moonMat = PropMeshes.Mat(moonColor * 0.6f, 0f, 0.2f, moonColor * 1.2f);
-            var moon = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            moon.name = "Moon";
-            DestroyColliderSafe(moon);
-            moon.transform.SetParent(parent, false);
-            moon.transform.localPosition = new Vector3(30f, 16f, 88f);
-            moon.transform.localScale = Vector3.one * 2.6f;
-            moon.GetComponent<Renderer>().sharedMaterial = moonMat;
-            NoShadow(moon);
+            // A couple of butterflies drifting over the lanes for a touch of life (runtime motion).
+            var flutter1 = Butterfly.Spawn(new Vector3(-1.2f, 1.1f, 3.5f), new Vector3(1.2f, 0.5f, 1.5f), new Color(1f, 0.62f, 0.2f));
+            flutter1.transform.SetParent(parent, false);
+            var flutter2 = Butterfly.Spawn(new Vector3(1.4f, 1.3f, 5.5f), new Vector3(1.0f, 0.6f, 1.4f), new Color(0.92f, 0.32f, 0.5f));
+            flutter2.transform.SetParent(parent, false);
         }
 
-        // Slow drifting tiny star dots high above/behind the lanes — adapted from
-        // FruitStageBuilder.BuildFallingLeaves (box-shape emitter, gentle noise drift), but
-        // static-feeling: near-zero gravity, long lifetime, white/cyan color.
-        // Drifting star dots — the proven DanceStage recipe: KinexFx.AmbientMotes for the emitter,
-        // a soft round additive dot material (a raw particle quad renders as a hard square), and a
-        // pre-Simulate so the field is populated in the edit-mode screenshot (Play() alone doesn't
-        // advance particles outside play mode). A big box high and AHEAD of the lanes (z 30..130).
-        static void BuildStarfield(Transform parent)
-        {
-            // Center on the VISIBLE sky band: the camera pitches 10° down, so at z~70 the frame
-            // tops out near y=22 — a box centered at y=32 sat entirely above the view (first pass
-            // showed no stars). y~13 puts the field in the dark band above the lanes.
-            var stars = KinexFx.AmbientMotes(
-                center: new Vector3(0f, 13f, 72f),
-                boxSize: new Vector3(200f, 28f, 90f),
-                color: new Color(1f, 1f, 1f, 0.95f),
-                rate: 30);
-            stars.name = "Starfield";
-            stars.transform.SetParent(parent, false);
-            stars.GetComponent<ParticleSystemRenderer>().sharedMaterial = SoftDotMaterial();
+        // ---- Sunny-park sky decor: a warm sun disc, drifting cloud clusters, roadside trees,
+        // and a gentle pollen mote field. Replaces the original starfield/planet/moon. ----
 
-            var main = stars.main;
-            main.startSize = new ParticleSystem.MinMaxCurve(0.18f, 0.5f); // far away — needs size to read as a star
-            main.startLifetime = new ParticleSystem.MinMaxCurve(16f, 26f);
-            main.startSpeed = new ParticleSystem.MinMaxCurve(0.01f, 0.04f);
-            main.startColor = new ParticleSystem.MinMaxGradient(Color.white, new Color(0.7f, 0.85f, 1f));
-            main.maxParticles = 400;
-            var drift = stars.velocityOverLifetime;
+        static void BuildSun(Transform parent)
+        {
+            var sunColor = new Color(1.0f, 0.95f, 0.76f);
+            var sunMat = PropMeshes.Mat(sunColor, 0f, 0.2f, sunColor * 2.2f); // emissive → blooms
+            var sun = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            sun.name = "Sun";
+            DestroyColliderSafe(sun);
+            sun.transform.SetParent(parent, false);
+            sun.transform.localPosition = new Vector3(-19f, 26f, 108f); // upper-left, balances the HUD
+            sun.transform.localScale = Vector3.one * 7f;
+            sun.GetComponent<Renderer>().sharedMaterial = sunMat;
+            NoShadow(sun);
+        }
+
+        static void BuildClouds(Transform parent)
+        {
+            var cloudMat = PropMeshes.Mat(new Color(0.99f, 0.99f, 1.0f), 0f, 0.1f, new Color(0.22f, 0.24f, 0.28f));
+            // x, y, z, size
+            var pts = new[]
+            {
+                new Vector4(-24f, 19f, 92f, 7f),
+                new Vector4(16f, 23f, 104f, 8f),
+                new Vector4(-6f, 26f, 120f, 9f),
+                new Vector4(28f, 17f, 88f, 6f),
+                new Vector4(3f, 21f, 132f, 10f),
+            };
+            foreach (var p in pts)
+            {
+                var cloud = new GameObject("Cloud");
+                cloud.transform.SetParent(parent, false);
+                cloud.transform.localPosition = new Vector3(p.x, p.y, p.z);
+                float s = p.w;
+                AddCloudPuff(cloud.transform, Vector3.zero, s, cloudMat);
+                AddCloudPuff(cloud.transform, new Vector3(s * 0.5f, -s * 0.08f, 0f), s * 0.7f, cloudMat);
+                AddCloudPuff(cloud.transform, new Vector3(-s * 0.55f, -s * 0.05f, s * 0.1f), s * 0.65f, cloudMat);
+                var drift = cloud.AddComponent<CloudDrift>();
+                drift.speed = 0.25f;
+                drift.range = 12f;
+            }
+        }
+
+        static void AddCloudPuff(Transform parent, Vector3 pos, float size, Material mat)
+        {
+            var puff = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            puff.name = "Puff";
+            DestroyColliderSafe(puff);
+            puff.transform.SetParent(parent, false);
+            puff.transform.localPosition = pos;
+            puff.transform.localScale = new Vector3(size, size * 0.5f, size * 0.7f);
+            puff.GetComponent<Renderer>().sharedMaterial = mat;
+            NoShadow(puff);
+        }
+
+        // Roadside trees framing both sides of the lanes, receding into the distance. Index-based
+        // (not Random) jitter keeps the build deterministic; each gets a GentleSway breeze.
+        static void BuildSideScenery(Transform parent)
+        {
+            float[] zs = { 1.5f, 5f, 9f, 14f, 20f };
+            float[] xs = { -3.7f, 3.7f };
+            int i = 0;
+            foreach (var z in zs)
+                foreach (var x in xs)
+                {
+                    var tree = PropMeshes.Tree();
+                    tree.name = "Tree";
+                    tree.transform.SetParent(parent, false);
+                    float scale = 1.0f + (i % 3) * 0.2f + z * 0.03f;
+                    tree.transform.localScale = Vector3.one * scale;
+                    tree.transform.localPosition = new Vector3(x + ((i % 2 == 0) ? -0.5f : 0.6f), 0f, z);
+                    tree.transform.localRotation = Quaternion.Euler(0f, i * 47f, 0f);
+                    foreach (var r in tree.GetComponentsInChildren<Renderer>()) NoShadowR(r);
+                    tree.AddComponent<GentleSway>().amplitudeDeg = 1.6f;
+                    i++;
+                }
+        }
+
+        // Gentle warm pollen motes drifting low over the grass — the sunlit-park counterpart to the
+        // old starfield. Reuses the soft additive dot + pre-Simulate so it shows in the edit shot.
+        static void BuildPollen(Transform parent)
+        {
+            var motes = KinexFx.AmbientMotes(
+                center: new Vector3(0f, 2.2f, 5f),
+                boxSize: new Vector3(13f, 5f, 12f),
+                color: new Color(1f, 0.97f, 0.72f, 0.5f),
+                rate: 10);
+            motes.name = "Pollen";
+            motes.transform.SetParent(parent, false);
+            motes.GetComponent<ParticleSystemRenderer>().sharedMaterial = SoftDotMaterial();
+
+            var main = motes.main;
+            main.startSize = new ParticleSystem.MinMaxCurve(0.03f, 0.09f);
+            main.startLifetime = new ParticleSystem.MinMaxCurve(6f, 12f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(0.05f, 0.15f);
+            main.startColor = new ParticleSystem.MinMaxGradient(new Color(1f, 0.98f, 0.78f), new Color(1f, 0.9f, 0.55f));
+            main.maxParticles = 120;
+            var drift = motes.velocityOverLifetime;
             drift.enabled = true;
-            drift.x = new ParticleSystem.MinMaxCurve(-0.02f, 0.02f);
+            // All three axes must share the same MinMaxCurve mode (two-constants) or Unity warns.
+            drift.x = new ParticleSystem.MinMaxCurve(-0.08f, 0.08f);
+            drift.y = new ParticleSystem.MinMaxCurve(0.02f, 0.12f);
+            drift.z = new ParticleSystem.MinMaxCurve(-0.05f, 0.05f);
 
             if (!Application.isPlaying && SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null)
-                stars.Simulate(12f, true, true);
+                motes.Simulate(6f, true, true);
         }
 
         static Texture2D s_SoftDotTex;
@@ -568,6 +611,8 @@ namespace Kinex.AstroStance.EditorTools
             so.FindProperty("useOneEuroSmoothing").boolValue = true;
             // Back-view scene: the avatar "follows" the player's own side instead of mirroring.
             so.FindProperty("sameSideRetarget").boolValue = true;
+            // Back view: keep the upper spine steady (head/ear drive folds the torso, looks wrong).
+            so.FindProperty("steadyUpperSpine").boolValue = true;
             so.ApplyModifiedPropertiesWithoutUndo();
         }
 
@@ -580,22 +625,25 @@ namespace Kinex.AstroStance.EditorTools
             var profile = ScriptableObject.CreateInstance<VolumeProfile>();
             AssetDatabase.CreateAsset(profile, PostProfilePath);
 
+            // Daylight grade: gentle bloom only on the sun/emissive lines, no darkening vignette,
+            // brighter exposure, and Neutral tonemapping (ACES crushes highlights toward a moody
+            // dark look — wrong for a bright park).
             var bloom = AddOverride<Bloom>(profile);
-            bloom.intensity.Override(1.4f);
-            bloom.threshold.Override(0.75f);
-            bloom.scatter.Override(0.55f);
+            bloom.intensity.Override(0.55f);
+            bloom.threshold.Override(0.95f);
+            bloom.scatter.Override(0.5f);
 
             var vignette = AddOverride<Vignette>(profile);
-            vignette.intensity.Override(0.3f);
-            vignette.smoothness.Override(0.6f);
+            vignette.intensity.Override(0.12f);
+            vignette.smoothness.Override(0.8f);
 
             var colors = AddOverride<ColorAdjustments>(profile);
-            colors.saturation.Override(4f);
-            colors.contrast.Override(6f);
-            colors.postExposure.Override(0.05f);
+            colors.saturation.Override(6f);
+            colors.contrast.Override(0f);
+            colors.postExposure.Override(0.15f);
 
             var tonemap = AddOverride<Tonemapping>(profile);
-            tonemap.mode.Override(TonemappingMode.ACES);
+            tonemap.mode.Override(TonemappingMode.Neutral);
 
             EditorUtility.SetDirty(profile);
             AssetDatabase.SaveAssets();

@@ -87,6 +87,13 @@ public class MediaPipePoseDetector : MonoBehaviour
              "go back to the real webcam.")]
     [SerializeField] UnityEngine.Video.VideoClip testVideoClip;
 
+    [Tooltip("EDITOR/DESKTOP TEST ONLY: substring of the webcam device name to prefer (e.g. " +
+             "\"DroidCam\", \"Iriun\", \"Camo\"). Case-insensitive. Lets Play-mode use a phone " +
+             "virtual-cam instead of the laptop's built-in camera. The exact device names are " +
+             "printed to the Console at start. Leave EMPTY to auto-pick the front camera. Ignored " +
+             "on Android (the tablet uses its own camera).")]
+    [SerializeField] string preferredCameraName = "";
+
     [Header("Avatar Axis Mapping (toggle LIVE in Play mode if a direction looks wrong)")]
     [Tooltip("The model's BACK faces the game camera (follow-behind), so your pose maps " +
              "DIRECTLY onto it — these only correct MediaPipe's raw axis signs vs Unity. " +
@@ -118,6 +125,11 @@ public class MediaPipePoseDetector : MonoBehaviour
              "the most reliable landmarks, so this avoids the torso twisting from shaky 3D depth. " +
              "Used by both games.")]
     [SerializeField] bool armsOnly = false;
+    [Tooltip("Keep the CHEST + NECK at their rest pose instead of driving them from the head/ear " +
+             "landmarks. The shoulder→ear vector is short and noisy, so it can over-rotate the upper " +
+             "torso into a forward fold — very visible in a back-view game. ON for AstroStance; OFF " +
+             "keeps the head/neck follow for front-facing games.")]
+    [SerializeField] bool steadyUpperSpine = false;
     [Tooltip("Drive the avatar from MediaPipe 3D WORLD landmarks (metric, hip-centered — BlazePose " +
              "GHUM): full-body depth + real left/right rotation. OFF = the legacy 2D screen-plane drive " +
              "(flat, no real turn). Toggle live via the gear panel; persisted.")]
@@ -208,6 +220,10 @@ public class MediaPipePoseDetector : MonoBehaviour
     /// trainer = high score" — independent of camera mirror / skeleton-overlay orientation.</summary>
     public Animator AvatarAnimator => _animator;
 
+    /// <summary>Turn the live pose puppet on/off. A game can disable it to pose the avatar itself
+    /// (e.g. AstroStance plays a scripted sit crouch during the sit rep) and re-enable it after.</summary>
+    public bool AvatarDriving { get => drivesAvatar; set => drivesAvatar = value; }
+
     // ---- Preview cover-crop, computed at runtime from the real webcam aspect so the
     //      skeleton overlay can map landmarks onto exactly what the preview shows. ----
     [Header("Preview")]
@@ -261,6 +277,15 @@ public class MediaPipePoseDetector : MonoBehaviour
     UnityEngine.Video.VideoPlayer _videoPlayer; // TEST ONLY: optional recorded-clip source
     RenderTexture _videoRT;
     bool UsingVideo => _videoPlayer != null;
+    // EDITOR TEST ONLY: when true, Update() skips all live capture and the avatar is driven purely
+    // from InjectRecordedFrame() (a saved .json landmark recording). Used to replay the recorded
+    // pose clips without a camera or a decodable video (see AstroTestClipSwitcher).
+    bool _replayActive;
+    // The live webcam feeds MediaPipe a BOTTOM-UP frame (flipY default is tuned for that); a test
+    // VIDEO clip feeds an UPRIGHT frame, so the avatar's vertical convention must be inverted for
+    // video only. Use this instead of flipY for avatar limb/torso Y direction. Replayed recordings
+    // (InjectRecordedFrame) use the plain webcam convention — verified upright on screen.
+    bool FlipYEff => flipY ^ UsingVideo;
     int SrcWidth  => UsingVideo ? _videoRT.width  : _webcam.width;
     int SrcHeight => UsingVideo ? _videoRT.height : _webcam.height;
     Texture2D _frame;                       // CPU copy fed to MediaPipe each tick
@@ -301,30 +326,37 @@ public class MediaPipePoseDetector : MonoBehaviour
 
         if (testVideoClip != null)
         {
-            // TEST ONLY: feed a recorded clip instead of the live webcam.
-            _videoPlayer = gameObject.AddComponent<UnityEngine.Video.VideoPlayer>();
-            _videoPlayer.clip = testVideoClip;
-            _videoPlayer.renderMode = UnityEngine.Video.VideoRenderMode.RenderTexture;
-            _videoPlayer.audioOutputMode = UnityEngine.Video.VideoAudioOutputMode.None;
-            _videoPlayer.isLooping = true;
-            _videoPlayer.playOnAwake = false;
-            _videoRT = new RenderTexture((int)testVideoClip.width, (int)testVideoClip.height, 0);
-            _videoPlayer.targetTexture = _videoRT;
-            _videoPlayer.Play();
-            if (_rawImage != null) _rawImage.texture = _videoRT;
-            Debug.Log($"[MediaPipePoseDetector] TEST MODE: feeding video '{testVideoClip.name}' " +
-                      "instead of the webcam. Clear the Test Video Clip field to use the live camera.");
+            StartVideo(testVideoClip); // TEST ONLY: feed a recorded clip instead of the live webcam
         }
         else
         {
-            // Prefer the front camera at 640x480x30 — the SAME capture scale the reference
-            // app requested. MediaPipe is fed the full frame (no pre-crop), exactly like the
-            // reference; cropping happens only for on-screen preview.
-            string frontCam = null;
-            foreach (var d in WebCamTexture.devices)
-                if (d.isFrontFacing) { frontCam = d.name; break; }
-            _webcam = frontCam != null
-                ? new WebCamTexture(frontCam, 640, 480, 30)
+            // Pick the capture device at 640x480x30 — the SAME capture scale the reference app
+            // requested. MediaPipe is fed the full frame (no pre-crop); cropping is preview-only.
+            // Selection order: (1) preferredCameraName substring match (desktop phone-cam testing),
+            // (2) the front-facing camera, (3) Unity's default device.
+            var devices = WebCamTexture.devices;
+            string chosen = null;
+            if (!string.IsNullOrEmpty(preferredCameraName))
+            {
+                foreach (var d in devices)
+                    if (d.name.IndexOf(preferredCameraName, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                    { chosen = d.name; break; }
+                if (chosen == null)
+                    Debug.LogWarning($"[MediaPipePoseDetector] preferredCameraName '{preferredCameraName}' " +
+                                     "matched no device — falling back to the front/default camera.");
+            }
+            if (chosen == null)
+                foreach (var d in devices)
+                    if (d.isFrontFacing) { chosen = d.name; break; }
+
+            // Log every available device so the exact name to type into preferredCameraName is visible.
+            var names = new System.Text.StringBuilder();
+            foreach (var d in devices) names.Append($"'{d.name}'{(d.isFrontFacing ? "(front)" : "")} ");
+            Debug.Log($"[MediaPipePoseDetector] Webcams: {(devices.Length == 0 ? "(none)" : names.ToString())}" +
+                      $"→ using {(chosen != null ? $"'{chosen}'" : "default device 0")}.");
+
+            _webcam = chosen != null
+                ? new WebCamTexture(chosen, 640, 480, 30)
                 : new WebCamTexture(640, 480, 30);
             _webcam.Play();
             if (_rawImage != null) _rawImage.texture = _webcam;
@@ -333,6 +365,77 @@ public class MediaPipePoseDetector : MonoBehaviour
         // Model load is async-capable so it works on Android, where StreamingAssets live inside the
         // APK and can't be read with System.IO. See InitLandmarker.
         StartCoroutine(InitLandmarker());
+    }
+
+    // TEST ONLY: (re)start the recorded-clip source, reusing the VideoPlayer/RenderTexture. Public so
+    // AstroTestClipSwitcher can hot-swap clips at runtime (numpad). Stops the live webcam if running,
+    // so UsingVideo becomes true from here on.
+    public void SetTestClip(UnityEngine.Video.VideoClip clip)
+    {
+        if (clip == null) return;
+        if (_rawImage == null) _rawImage = FindAnyObjectByType<UnityEngine.UI.RawImage>();
+        if (_webcam != null && _webcam.isPlaying) _webcam.Stop();
+        StartVideo(clip);
+    }
+
+    // EDITOR TEST ONLY: drive the avatar + detectors from ONE recorded frame of 33 image-space
+    // MediaPipe landmarks (flat x,y,z,visibility ×33 — the upright/top-origin format that
+    // tools/extract_landmarks.py writes, identical to what the live video path feeds MediaPipe).
+    // Lets the recorded pose clips be replayed with NO camera and NO video decode (the tablet
+    // clips don't decode in Windows Media Foundation). Populates the same public surface the live
+    // path does; drives the 2D avatar path (a recording carries no metric GHUM world landmarks).
+    public void InjectRecordedFrame(float[] v)
+    {
+        if (v == null || v.Length < 33 * 4) return;
+        _replayActive = true;
+        use3DWorld = false;   // no world landmarks in a recording → 2D screen-plane drive
+        _world33Init = false;
+        if (LatestKeypoints == null) LatestKeypoints = new Vector2[17];
+        if (LatestConfidence == null) LatestConfidence = new float[17];
+
+        for (int i = 0; i < 33; i++)
+        {
+            _landmarks33[i].x = v[i * 4 + 0];
+            _landmarks33[i].y = v[i * 4 + 1];
+            _landmarks33[i].z = v[i * 4 + 2];
+            _landmarks33[i].visibility = v[i * 4 + 3];
+        }
+        _landmarks33Init = true;
+
+        for (int i = 0; i < 17; i++) LatestConfidence[i] = 0f;
+        foreach (var (mp, coco) in MP_TO_COCO)
+        {
+            LatestKeypoints[coco] = new Vector2(v[mp * 4 + 0], v[mp * 4 + 1]);
+            LatestConfidence[coco] = v[mp * 4 + 3];
+        }
+        HasPose = true;
+    }
+
+    // EDITOR TEST ONLY: leave replay mode; live capture resumes on the next Update.
+    public void StopReplay() { _replayActive = false; }
+
+    void StartVideo(UnityEngine.Video.VideoClip clip)
+    {
+        if (_videoPlayer == null)
+        {
+            _videoPlayer = gameObject.AddComponent<UnityEngine.Video.VideoPlayer>();
+            _videoPlayer.renderMode = UnityEngine.Video.VideoRenderMode.RenderTexture;
+            _videoPlayer.audioOutputMode = UnityEngine.Video.VideoAudioOutputMode.None;
+            _videoPlayer.isLooping = true;
+            _videoPlayer.playOnAwake = false;
+        }
+        _replayActive = false; // a real clip source takes over from any recording replay
+        _videoPlayer.clip = clip;
+        int w = (int)clip.width, h = (int)clip.height;
+        if (_videoRT == null || _videoRT.width != w || _videoRT.height != h)
+        {
+            if (_videoRT != null) _videoRT.Release();
+            _videoRT = new RenderTexture(w, h, 0);
+        }
+        _videoPlayer.targetTexture = _videoRT;
+        _videoPlayer.Play();
+        if (_rawImage != null) _rawImage.texture = _videoRT;
+        Debug.Log($"[MediaPipePoseDetector] TEST MODE: feeding video '{clip.name}'.");
     }
 
     // Loads the pose model and creates the landmarker. On Android, Application.streamingAssetsPath
@@ -476,6 +579,7 @@ public class MediaPipePoseDetector : MonoBehaviour
 
     void Update()
     {
+        if (_replayActive) return; // driven by InjectRecordedFrame instead of live capture
         if (_landmarker == null) return;
         if (UsingVideo) { if (_videoPlayer == null || !_videoPlayer.isPrepared) return; }
         else if (_webcam == null || !_webcam.didUpdateThisFrame) return;
@@ -488,8 +592,11 @@ public class MediaPipePoseDetector : MonoBehaviour
         int srcW = SrcWidth, srcH = SrcHeight;
         if (UsingVideo)
         {
-            // Video path: unchanged. On Windows/DirectX, ReadPixels from a RenderTexture returns
-            // top-down data (the DX convention matches what MediaPipe expects). No flip needed.
+            // Video path (TEST ONLY — device always uses the webcam below). ReadPixels gives an
+            // UPRIGHT frame, which is exactly what MediaPipe wants, so feed it as-is (NO flip —
+            // flipping the image would make MediaPipe detect an upside-down person and mangle the
+            // torso/limbs). The avatar's vertical convention is corrected separately via FlipYEff
+            // (flipY is XOR'd with UsingVideo), since the webcam's flipY is tuned for its bottom-up frames.
             if (_frame == null || _frame.width != srcW || _frame.height != srcH)
                 _frame = new Texture2D(srcW, srcH, TextureFormat.RGBA32, false);
             var prevActive = RenderTexture.active;
@@ -827,8 +934,12 @@ public class MediaPipePoseDetector : MonoBehaviour
             // Hips/pelvis first (root): knee-mid → hip-mid captures pelvic tilt.
             TryDriveMidMid(HumanBodyBones.Hips,  kp, conf, L_KNEE, R_KNEE, L_HIP, R_HIP, t, followStrength);
             TryDriveMidMid(HumanBodyBones.Spine, kp, conf, L_HIP, R_HIP, L_SHOULDER, R_SHOULDER, t, followStrength);
-            TryDriveMidMid(HumanBodyBones.Chest, kp, conf, L_SHOULDER, R_SHOULDER, L_EAR, R_EAR, t, followStrength);
-            TryDriveMid  (HumanBodyBones.Neck,  kp, conf, L_SHOULDER, R_SHOULDER, NOSE, t, followStrength);
+            if (steadyUpperSpine) { RestBone(HumanBodyBones.Chest); RestBone(HumanBodyBones.Neck); }
+            else
+            {
+                TryDriveMidMid(HumanBodyBones.Chest, kp, conf, L_SHOULDER, R_SHOULDER, L_EAR, R_EAR, t, followStrength);
+                TryDriveMid  (HumanBodyBones.Neck,  kp, conf, L_SHOULDER, R_SHOULDER, NOSE, t, followStrength);
+            }
         }
 
         // Arms — cross-side mapping so the avatar copies the user same-side (selfie/front cam).
@@ -945,7 +1056,7 @@ public class MediaPipePoseDetector : MonoBehaviour
         if (t == null) return;
 
         float dx = to2D.x - from2D.x; if (flipX) dx = -dx;
-        float dy = to2D.y - from2D.y; if (flipY) dy = -dy;
+        float dy = to2D.y - from2D.y; if (FlipYEff) dy = -dy;
         Vector3 screenTarget = new Vector3(dx, dy, 0f);
         if (screenTarget.sqrMagnitude < 0.01f) return;
         // De-yaw the screen-plane target into the body-local (un-turned) frame BEFORE matching the bone,
@@ -1012,8 +1123,12 @@ public class MediaPipePoseDetector : MonoBehaviour
         {
             TryDriveMidMid3D(HumanBodyBones.Hips,  MP_L_KNEE, MP_R_KNEE, MP_L_HIP, MP_R_HIP, followStrength);
             TryDriveMidMid3D(HumanBodyBones.Spine, MP_L_HIP, MP_R_HIP, MP_L_SHOULDER, MP_R_SHOULDER, followStrength);
-            TryDriveMidMid3D(HumanBodyBones.Chest, MP_L_SHOULDER, MP_R_SHOULDER, MP_L_EAR, MP_R_EAR, followStrength);
-            TryDriveMid3D  (HumanBodyBones.Neck,  MP_L_SHOULDER, MP_R_SHOULDER, MP_NOSE, followStrength);
+            if (steadyUpperSpine) { RestBone(HumanBodyBones.Chest); RestBone(HumanBodyBones.Neck); }
+            else
+            {
+                TryDriveMidMid3D(HumanBodyBones.Chest, MP_L_SHOULDER, MP_R_SHOULDER, MP_L_EAR, MP_R_EAR, followStrength);
+                TryDriveMid3D  (HumanBodyBones.Neck,  MP_L_SHOULDER, MP_R_SHOULDER, MP_NOSE, followStrength);
+            }
         }
 
         // Arms — cross-side (selfie/front cam) by default: avatar-Left from MediaPipe-Right.
@@ -1071,7 +1186,7 @@ public class MediaPipePoseDetector : MonoBehaviour
 
         Vector3 d = to - from;
         float dx = d.x; if (flipX) dx = -dx;
-        float dy = d.y; if (flipY) dy = -dy;
+        float dy = d.y; if (FlipYEff) dy = -dy;
         float dz = d.z; if (flipZ) dz = -dz;
         // 2.5D hybrid: MediaPipe's world DEPTH (z) is noisy and makes a side-extended limb point
         // toward/away from the camera, so from the front view it looks foreshortened + laggy vs the

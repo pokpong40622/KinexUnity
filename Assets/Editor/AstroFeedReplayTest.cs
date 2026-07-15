@@ -48,6 +48,12 @@ namespace Kinex.AstroStance.EditorTools
             TestKick("kickleft", expectLeft: true);
             TestKick("kickright", expectLeft: false);
 
+            // The AstroSitClassifier must ONLY fire on a real sit — never on a step or a kick.
+            TestNoFalseSit("goleft");
+            TestNoFalseSit("goright");
+            TestNoFalseSit("kickleft");
+            TestNoFalseSit("kickright");
+
             if (_fail == 0) Debug.Log($"ASTRO FEED TEST: ALL PASS ({_pass})");
             else Debug.LogError($"SELFTEST FAIL — ASTRO FEED TEST: {_fail} failed, {_pass} passed");
         }
@@ -119,35 +125,48 @@ namespace Kinex.AstroStance.EditorTools
             Check(feed != null, $"{name}: feed json loads");
             if (feed == null) return;
 
-            var sitStand = new SitStandDetector();
+            // AstroSitClassifier is calibration-free: no baseline pass, and it boots in Standing
+            // so a standing player yields NO synthetic stand before the real sit→stand rep.
+            var sit = new AstroSitClassifier();
             var kp = new Vector2[17];
             var conf = new float[17];
             float dt = 1f / Mathf.Max(feed.fps, 1f);
 
-            // Player starts STANDING: calibrate standing on the first second, derive seated.
-            // 0.30 = AstroStance's shallow-sit factor (measured chair sits drop ~0.37 torso
-            // and seated torso-shrink eats part of that) — MUST match the director's value.
-            int calFrames = Mathf.Min(30, feed.frames.Length / 3);
-            for (int i = 0; i < calFrames; i++)
-                if (ToCoco(feed.frames[i], kp, conf))
-                    sitStand.CalibrateStanding(kp);
-            sitStand.EstimateSeatedFromStanding(0.30f);
-            Check(sitStand.IsCalibrated, $"{name}: detector calibrated");
-
-            // Boot quirk: state machine starts Seated, so the standing player yields one
-            // synthetic JustStood almost immediately. Track order, not raw counts.
-            int sats = 0, stoodAfterSat = 0, synthetic = 0;
+            int sats = 0, stoodAfterSat = 0, phantomStood = 0;
             for (int i = 0; i < feed.frames.Length; i++)
             {
                 if (!ToCoco(feed.frames[i], kp, conf)) continue;
-                sitStand.Tick(kp, conf, dt);
-                if (sitStand.JustStood) { if (sats > 0) stoodAfterSat++; else synthetic++; }
-                if (sitStand.JustSat) sats++;
+                sit.Tick(kp, conf, dt);
+                if (sit.JustStood) { if (sats > 0) stoodAfterSat++; else phantomStood++; }
+                if (sit.JustSat) sats++;
             }
 
             Check(sats == 1, $"{name}: exactly one sit detected", $"sats={sats}");
             Check(stoodAfterSat == 1, $"{name}: stood back up after the sit", $"stoodAfterSat={stoodAfterSat}");
-            Check(synthetic <= 1, $"{name}: at most one synthetic boot-stand", $"synthetic={synthetic}");
+            Check(phantomStood == 0, $"{name}: no phantom stand before the sit", $"phantom={phantomStood}");
+        }
+
+        /// <summary>A non-sit move (step/kick) must never trip the sit classifier.</summary>
+        static void TestNoFalseSit(string name)
+        {
+            var feed = Load(name);
+            Check(feed != null, $"{name}: feed json loads");
+            if (feed == null) return;
+
+            var sit = new AstroSitClassifier();
+            var kp = new Vector2[17];
+            var conf = new float[17];
+            float dt = 1f / Mathf.Max(feed.fps, 1f);
+
+            int sats = 0;
+            for (int i = 0; i < feed.frames.Length; i++)
+            {
+                if (!ToCoco(feed.frames[i], kp, conf)) continue;
+                sit.Tick(kp, conf, dt);
+                if (sit.JustSat) sats++;
+            }
+
+            Check(sats == 0, $"{name}: no false sit on this move", $"sats={sats}");
         }
 
         static void TestKick(string name, bool expectLeft)

@@ -8,35 +8,47 @@ using Kinex.DanceStar;
 namespace Kinex.EditorTools
 {
     /// <summary>
-    /// One-click builder for the SUPERSTAR STAGE UI — same procedural-canvas + SerializedObject
-    /// wiring pattern as MirrorGameUIBuilder/TempleHuntUIBuilder. Re-runnable: destroys its own
-    /// panels by name and rebuilds, then wires every DanceStarDirector UI field. Big Thai text
-    /// (>=40px), FC Iconic fonts, gold/magenta/cyan neon accents matching DanceStage. Bottom
-    /// corners are left deliberately empty for the shared Kinex.UI.GameHud heart-rate/match rings
-    /// (see class doc note below — DanceStarDirector does not currently call GameHud.Ensure, so
-    /// nothing renders there yet; the space is reserved for parity with the other games).
+    /// Builder for the CLINICAL 2D SUPERSTAR STAGE UI (bright/friendly theme — soft blue, white
+    /// rounded cards, colorful skeleton). Layout: a large live CAMERA FEED with the detected
+    /// skeleton drawn on the user is the hero; a static reference figure ("ทำท่านี้") sits top-left;
+    /// the pose name + card counter + a green "match" meter sit top-right; a live feedback line
+    /// coaches over the feed; a framing overlay pauses the card when the body leaves frame. No
+    /// hearts / streak / score during play — stars appear only on the results screen.
+    ///
+    /// The camera feed lives in its OWN always-active panel (not inside HudPanel) because
+    /// MediaPipePoseDetector.Start() binds to the RawImage via FindAnyObjectByType, which skips
+    /// inactive objects. Intro/Calib/Chair/Results panels are opaque and cover the feed; HudPanel is
+    /// transparent and overlays it. Re-runnable: destroys its own panels by name and rebuilds, then
+    /// wires every DanceStarDirector field it owns.
     /// </summary>
     public static class DanceStarUIBuilder
     {
         const float FW = 927f, FH = 1427f;
 
-        static readonly Color Ink = new Color32(0x1E, 0x16, 0x2E, 0xFF);
-        static readonly Color CardWhite = new Color32(0xFF, 0xFF, 0xFF, 0xF0);
-        static readonly Color CardWarm = new Color32(0xFF, 0xF3, 0xDD, 0xF2);
-        static readonly Color Gold = new Color32(0xFF, 0xD1, 0x55, 0xFF);
-        static readonly Color Magenta = new Color32(0xE8, 0x3A, 0xA8, 0xFF);
-        static readonly Color Cyan = new Color32(0x2A, 0xC7, 0xE0, 0xFF);
-        static readonly Color RingDim = new Color32(0x00, 0x00, 0x00, 0x55);
-        static readonly Color Violet = new Color32(0x5B, 0x3A, 0x8E, 0xFF);
-        static readonly Color GreenGo = new Color32(0x4C, 0xAF, 0x50, 0xFF);
-        static readonly Color FlameOrange = new Color32(0xFF, 0x8A, 0x2E, 0xFF);
-        static readonly Color HeartOff = new Color32(0xFF, 0xFF, 0xFF, 0x38);
+        // ---- Bright / clinical palette ----
+        static readonly Color BgBlue     = new Color32(0xDD, 0xEB, 0xFB, 0xFF); // soft page blue (opaque)
+        static readonly Color CardWhite  = new Color32(0xFF, 0xFF, 0xFF, 0xF7);
+        static readonly Color CardWarm   = new Color32(0xFF, 0xF4, 0xE2, 0xFF);
+        static readonly Color Ink        = new Color32(0x22, 0x31, 0x4A, 0xFF);
+        static readonly Color InkSoft    = new Color32(0x5A, 0x6B, 0x85, 0xFF);
+        static readonly Color Blue       = new Color32(0x2E, 0x86, 0xDE, 0xFF);
+        static readonly Color BlueDeep   = new Color32(0x1B, 0x5F, 0xA8, 0xFF);
+        static readonly Color Green      = new Color32(0x34, 0xC7, 0x59, 0xFF);
+        static readonly Color Gold       = new Color32(0xFF, 0xC9, 0x3C, 0xFF);
+        static readonly Color Coral      = new Color32(0xFF, 0x6B, 0x6B, 0xFF);
+        static readonly Color FeedFrame  = new Color32(0xFF, 0xFF, 0xFF, 0xFF);
+        static readonly Color FeedbackBg = new Color32(0x14, 0x20, 0x36, 0xB8); // dark translucent band over video
+        static readonly Color TrackDim   = new Color32(0x2E, 0x86, 0xDE, 0x30);
 
         const string ThaiBlackPath = "Assets/Fonts/FCIconic-Black SDF.asset";
         const string ThaiSemiPath = "Assets/Fonts/FCIconic-SemiBold SDF.asset";
 
         static readonly string[] PanelNames =
-            { "IntroPanel", "CalibPanel", "ChairSafetyPanel", "HudPanel", "ResultsPanel", "ExitButton" };
+        {
+            "BackgroundPanel", "CameraFeedPanel", "HudPanel",
+            "CalibPanel", "ChairSafetyPanel", "IntroPanel", "ResultsPanel",
+            "FramingPanel", "ExitButton",
+        };
 
         [MenuItem("Kinex/Build Dance Star UI")]
         public static void Build() => Debug.Log("[DanceStarUIBuilder] " + BuildUI());
@@ -47,6 +59,7 @@ namespace Kinex.EditorTools
             if (director == null) return "No DanceStarDirector in the open scene. Run the scene builder first.";
             var canvas = Object.FindAnyObjectByType<Canvas>();
             if (canvas == null) return "No Canvas in scene.";
+            var detector = Object.FindAnyObjectByType<MediaPipePoseDetector>();
 
             var thaiBlack = LoadFont(ThaiBlackPath);
             var thaiSemi = LoadFont(ThaiSemiPath);
@@ -59,121 +72,155 @@ namespace Kinex.EditorTools
                     if (child.name == n) { Object.DestroyImmediate(child.gameObject); break; }
             }
 
-            // =================== INTRO ===================
-            var intro = NewPanel(canvas.transform, "IntroPanel");
-            AddCard(intro.transform, 64, 320, 800, 560);
-            AddStarMotif(intro.transform, 150, 372, knob);
-            AddStarMotif(intro.transform, 700, 372, knob);
-            var introTitle = AddText(intro.transform, "เวทีซุปตาร์", thaiBlack, 94, Ink, TextAlignmentOptions.Center);
-            Place(introTitle.rectTransform, 94, 400, 740, 140);
-            var superstarLabel = AddText(intro.transform, "SUPERSTAR STAGE", thaiSemi, 34, Magenta, TextAlignmentOptions.Center);
-            Place(superstarLabel.rectTransform, 94, 542, 740, 54);
-            var introSubtitle = AddText(intro.transform, "", thaiSemi, 42, new Color(0.28f, 0.2f, 0.16f), TextAlignmentOptions.Center);
-            Place(introSubtitle.rectTransform, 124, 630, 680, 220);
+            // =================== BACKGROUND (bottom) ===================
+            var bg = NewPanel(canvas.transform, "BackgroundPanel");
+            var bgImg = bg.GetComponent<Image>();
+            bgImg.color = BgBlue;
+            bgImg.raycastTarget = false;
 
-            // =================== CALIBRATION ===================
-            var calib = NewPanel(canvas.transform, "CalibPanel");
-            AddCard(calib.transform, 64, 560, 800, 300);
-            var calibText = AddText(calib.transform, "", thaiSemi, 48, Ink, TextAlignmentOptions.Center);
-            Place(calibText.rectTransform, 104, 600, 720, 140);
-            var (calibTrack, calibFill) = AddProgressBar(calib.transform, 124, 770, 680, 26, Cyan);
+            // =================== CAMERA FEED (hero, always active) ===================
+            // White rounded frame + inset RawImage + skeleton overlay. Kept in its own panel so the
+            // detector's FindAnyObjectByType<RawImage> binds even while HudPanel is inactive.
+            var feed = NewPanel(canvas.transform, "CameraFeedPanel");
+            feed.GetComponent<Image>().enabled = false;
+            var frame = AddImage(feed.transform, "FeedFrame", null, FeedFrame);
+            Round(frame);
+            Place(frame.rectTransform, 40, 430, 847, 842);
+            var frameShadow = frame.gameObject.AddComponent<Shadow>();
+            frameShadow.effectColor = new Color(0.11f, 0.19f, 0.33f, 0.28f);
+            frameShadow.effectDistance = new Vector2(0, 6);
 
-            // =================== CHAIR SAFETY (mid-song bridge) ===================
-            var chairSafety = NewPanel(canvas.transform, "ChairSafetyPanel");
-            var chairCard = AddCard(chairSafety.transform, 64, 500, 800, 400, CardWarm);
-            var chairIcon = AddImage(chairSafety.transform, "ChairIcon", knob, FlameOrange);
-            Place(chairIcon.rectTransform, 413, 540, 100, 100);
-            var chairSafetyText = AddText(chairSafety.transform, "", thaiSemi, 48,
-                                          new Color(0.35f, 0.2f, 0.05f), TextAlignmentOptions.Center);
-            Place(chairSafetyText.rectTransform, 114, 670, 700, 200);
+            var rawGo = new GameObject("CameraFeedImage", typeof(RectTransform), typeof(CanvasRenderer), typeof(RawImage));
+            var rawRt = (RectTransform)rawGo.transform;
+            rawRt.SetParent(frame.rectTransform, false);
+            rawRt.anchorMin = Vector2.zero; rawRt.anchorMax = Vector2.one;
+            rawRt.offsetMin = new Vector2(10f, 10f); rawRt.offsetMax = new Vector2(-10f, -10f);
+            var raw = rawGo.GetComponent<RawImage>();
+            raw.color = new Color(0.05f, 0.07f, 0.11f); // dark placeholder before the webcam opens
 
-            // =================== HUD ===================
+            var overlayGo = new GameObject("PoseSkeletonOverlay", typeof(RectTransform), typeof(CanvasRenderer));
+            var overlayRt = (RectTransform)overlayGo.transform;
+            overlayRt.SetParent(rawRt, false);
+            overlayRt.anchorMin = Vector2.zero; overlayRt.anchorMax = Vector2.one;
+            overlayRt.offsetMin = Vector2.zero; overlayRt.offsetMax = Vector2.zero;
+            var overlay = overlayGo.AddComponent<PoseSkeletonOverlay>();
+            overlay.source = detector;
+            overlay.confidenceColors = true;
+
+            // =================== HUD (transparent overlay on the feed) ===================
             var hud = NewPanel(canvas.transform, "HudPanel");
 
-            // -- Score, top-centre. --
-            var scoreText = AddText(hud.transform, "0", thaiBlack, 76, Gold, TextAlignmentOptions.Center);
-            Place(scoreText.rectTransform, 313, 30, 300, 96);
-            Outline(scoreText, new Color(0f, 0f, 0f, 0.6f), 0.25f);
+            // -- Reference figure card, top-left (portrait slot so the figure reads large). --
+            AddCard(hud.transform, 40, 28, 300, 384);
+            var refLabel = AddText(hud.transform, "ทำท่านี้", thaiSemi, 36, Blue, TextAlignmentOptions.Center);
+            Place(refLabel.rectTransform, 56, 40, 268, 44);
+            var referenceImage = AddImage(hud.transform, "ReferenceImage", null, Color.white);
+            referenceImage.preserveAspect = true;
+            referenceImage.enabled = false; // sprite assigned per-card at runtime
+            Place(referenceImage.rectTransform, 90, 96, 200, 306);
 
-            // -- Streak chip, centred just under the score. --
-            var streakChip = AddImage(hud.transform, "StreakChip", null, new Color(0.1f, 0.05f, 0.15f, 0.55f));
-            Round(streakChip);
-            Place(streakChip.rectTransform, 335, 138, 260, 58);
-            var streakFlameIcon = AddImage(hud.transform, "StreakFlameIcon", knob, FlameOrange);
-            Place(streakFlameIcon.rectTransform, 350, 146, 42, 42);
-            var streakText = AddText(hud.transform, "", thaiBlack, 40, Gold, TextAlignmentOptions.Left);
-            Place(streakText.rectTransform, 404, 138, 176, 58);
+            // -- Pose name + counter + match meter, top-right column (x372..782). --
+            var poseNameText = AddText(hud.transform, "", thaiBlack, 60, Ink, TextAlignmentOptions.Center);
+            Place(poseNameText.rectTransform, 366, 40, 416, 116);
+            var cardCountText = AddText(hud.transform, "", thaiSemi, 34, InkSoft, TextAlignmentOptions.Center);
+            Place(cardCountText.rectTransform, 366, 158, 416, 46);
 
-            // -- Hearts row, top-left (clear of the camera feed, which starts at x=648). --
-            var heartImages = new Image[5];
-            for (int i = 0; i < 5; i++)
-            {
-                heartImages[i] = AddImage(hud.transform, $"Heart{i + 1}", knob, HeartOff);
-                Place(heartImages[i].rectTransform, 40 + i * 46, 140, 40, 40);
-            }
+            var matchLabel = AddText(hud.transform, "ตรงท่า", thaiSemi, 30, InkSoft, TextAlignmentOptions.Left);
+            Place(matchLabel.rectTransform, 372, 214, 120, 40);
+            var (matchTrack, matchMeterFill) = AddProgressBar(hud.transform, 500, 218, 282, 30, Green);
+            matchTrack.color = new Color(0.20f, 0.78f, 0.35f, 0.18f);
 
-            // -- Song progress bar + section name, spanning full width below the camera feed
-            // (which occupies y=55..355) so nothing renders underneath the opaque feed panel. --
-            var (songTrack, songFill) = AddProgressBar(hud.transform, 40, 365, 847, 18, Magenta);
-            var sectionNameText = AddText(hud.transform, "", thaiSemi, 34, new Color(1f, 1f, 1f, 0.85f), TextAlignmentOptions.Center);
-            Place(sectionNameText.rectTransform, 40, 392, 847, 40);
-            Outline(sectionNameText, new Color(0f, 0f, 0f, 0.6f), 0.2f);
+            var sectionNameText = AddText(hud.transform, "", thaiSemi, 30, InkSoft, TextAlignmentOptions.Center);
+            Place(sectionNameText.rectTransform, 366, 296, 416, 40);
 
-            // -- Pose card + balance gauge, BOTH stacked in the right column (x560..887) — the
-            // trainer stands off to screen-left on its podium, so keeping every player-status
-            // gauge on the right keeps them clear of the trainer entirely (round-2 screenshot
-            // showed a left-side gauge sitting right on top of the trainer). --
-            // Dark glass cards — white cards glowed like lightboxes against the night stage
-            // (bloom amplified them) and made their dark Ink/Violet text unreadable.
-            var hudCardColor = new Color(0.07f, 0.045f, 0.15f, 0.82f);
-            AddCard(hud.transform, 560, 430, 327, 270, hudCardColor);
-            var poseNameText = AddText(hud.transform, "", thaiBlack, 42, Color.white, TextAlignmentOptions.Center);
-            Place(poseNameText.rectTransform, 582, 450, 284, 70);
-            var (ringTrack, countdownRingFill) = AddRadialRing(hud.transform, 638, 528, 150, Gold);
-            ringTrack.color = new Color(1f, 1f, 1f, 0.12f);
-            var cardCountText = AddText(hud.transform, "", thaiSemi, 36, new Color(0.82f, 0.74f, 1f, 1f), TextAlignmentOptions.Center);
-            Place(cardCountText.rectTransform, 582, 656, 284, 44);
+            // -- Countdown ring floating over the feed's top-right corner. --
+            var (ringTrack, countdownRingFill) = AddRadialRing(hud.transform, 762, 450, 104, Blue);
+            ringTrack.color = TrackDim;
 
-            AddCard(hud.transform, 560, 716, 327, 150, hudCardColor);
-            var wobbleLabel = AddText(hud.transform, "ทรงตัว", thaiSemi, 32, new Color(0.82f, 0.74f, 1f, 1f), TextAlignmentOptions.Center);
-            Place(wobbleLabel.rectTransform, 582, 730, 180, 40);
-            var (wobbleTrack, tandemWobbleFill) = AddRadialRing(hud.transform, 764, 726, 100, Cyan);
-            wobbleTrack.color = new Color(1f, 1f, 1f, 0.12f);
+            // -- Live feedback band over the feed's lower area. --
+            var fbBand = AddImage(hud.transform, "FeedbackBand", null, FeedbackBg);
+            Round(fbBand);
+            Place(fbBand.rectTransform, 96, 1150, 735, 92);
+            var feedbackText = AddText(hud.transform, "", thaiBlack, 48, Color.white, TextAlignmentOptions.Center);
+            Place(feedbackText.rectTransform, 112, 1150, 703, 92);
 
-            // -- Rating popup, big + centred. --
+            // -- Song progress, bottom. --
+            var (songTrack, songFill) = AddProgressBar(hud.transform, 40, 1300, 847, 16, Blue);
+            songTrack.color = TrackDim;
+
+            // -- Rating popup, big + centred over the feed. --
             var ratingPopupText = AddText(hud.transform, "", thaiBlack, 104, Gold, TextAlignmentOptions.Center);
-            Place(ratingPopupText.rectTransform, 64, 850, 800, 150);
-            Outline(ratingPopupText, new Color(0f, 0f, 0f, 0.75f), 0.3f);
+            Place(ratingPopupText.rectTransform, 64, 560, 800, 170);
+            Outline(ratingPopupText, new Color(0.11f, 0.19f, 0.33f, 0.85f), 0.3f);
             ratingPopupText.gameObject.SetActive(false);
 
-            // =================== RESULTS ===================
+            // =================== CALIBRATION (opaque) ===================
+            var calib = NewPanel(canvas.transform, "CalibPanel");
+            calib.GetComponent<Image>().color = BgBlue;
+            AddCard(calib.transform, 64, 540, 800, 320);
+            var calibText = AddText(calib.transform, "", thaiSemi, 48, Ink, TextAlignmentOptions.Center);
+            Place(calibText.rectTransform, 104, 590, 720, 160);
+            var (calibTrack, calibFill) = AddProgressBar(calib.transform, 124, 780, 680, 26, Blue);
+            calibTrack.color = TrackDim;
+
+            // =================== CHAIR SAFETY (opaque, warm) ===================
+            var chairSafety = NewPanel(canvas.transform, "ChairSafetyPanel");
+            chairSafety.GetComponent<Image>().color = BgBlue;
+            AddCard(chairSafety.transform, 64, 500, 800, 400, CardWarm);
+            var chairIcon = AddImage(chairSafety.transform, "ChairIcon", knob, new Color32(0xF0, 0x9A, 0x3C, 0xFF));
+            Place(chairIcon.rectTransform, 413, 540, 100, 100);
+            var chairSafetyText = AddText(chairSafety.transform, "", thaiSemi, 46,
+                                          new Color(0.35f, 0.22f, 0.08f), TextAlignmentOptions.Center);
+            Place(chairSafetyText.rectTransform, 114, 670, 700, 200);
+
+            // =================== INTRO (opaque splash) ===================
+            var intro = NewPanel(canvas.transform, "IntroPanel");
+            intro.GetComponent<Image>().color = BgBlue;
+            AddCard(intro.transform, 64, 300, 800, 640);
+            var introTitle = AddText(intro.transform, "เวทีซุปตาร์", thaiBlack, 90, Ink, TextAlignmentOptions.Center);
+            Place(introTitle.rectTransform, 94, 360, 740, 130);
+            var superLabel = AddText(intro.transform, "SUPERSTAR STAGE", thaiSemi, 34, Blue, TextAlignmentOptions.Center);
+            Place(superLabel.rectTransform, 94, 486, 740, 52);
+            var introSubtitle = AddText(intro.transform, "", thaiSemi, 42, InkSoft, TextAlignmentOptions.Center);
+            Place(introSubtitle.rectTransform, 124, 590, 680, 300);
+
+            // =================== RESULTS (opaque) ===================
             var results = NewPanel(canvas.transform, "ResultsPanel");
-            results.GetComponent<Image>().color = new Color(0.05f, 0.03f, 0.09f, 0.72f);
-            var resTitle = AddText(results.transform, "คุณคือซุปตาร์!", thaiBlack, 88, Color.white, TextAlignmentOptions.Center);
-            Place(resTitle.rectTransform, 94, 190, 740, 160);
-            Outline(resTitle, Gold, 0.25f);
+            results.GetComponent<Image>().color = BgBlue;
+            var resTitle = AddText(results.transform, "เยี่ยมมาก!", thaiBlack, 88, Ink, TextAlignmentOptions.Center);
+            Place(resTitle.rectTransform, 94, 190, 740, 150);
             var starImages = new Image[3];
             for (int i = 0; i < 3; i++)
             {
                 starImages[i] = AddImage(results.transform, $"Star{i + 1}", knob, StarOff());
-                Place(starImages[i].rectTransform, 288 + i * 140, 390, 110, 110);
+                Place(starImages[i].rectTransform, 288 + i * 140, 380, 110, 110);
             }
-            var statsText = AddText(results.transform, "", thaiSemi, 46, Color.white, TextAlignmentOptions.Center);
-            Place(statsText.rectTransform, 114, 570, 700, 320);
-            var againBtn = AddPillButton(results.transform, "PlayAgainButton", "เล่นอีกครั้ง", thaiSemi, GreenGo, 160, 980, 300, 110);
+            var statsText = AddText(results.transform, "", thaiSemi, 46, Ink, TextAlignmentOptions.Center);
+            Place(statsText.rectTransform, 114, 560, 700, 320);
+            var againBtn = AddPillButton(results.transform, "PlayAgainButton", "เล่นอีกครั้ง", thaiSemi, Green, 160, 980, 300, 110);
             UnityEditor.Events.UnityEventTools.AddPersistentListener(againBtn.onClick, director.PlayAgain);
-            var homeBtn = AddPillButton(results.transform, "HomeButton", "กลับหน้าหลัก", thaiSemi, Violet, 480, 980, 300, 110);
+            var homeBtn = AddPillButton(results.transform, "HomeButton", "กลับหน้าหลัก", thaiSemi, Blue, 480, 980, 300, 110);
             UnityEditor.Events.UnityEventTools.AddPersistentListener(homeBtn.onClick, director.ExitToHome);
 
-            // =================== EXIT (all states) ===================
-            var exitBtn = AddPillButton(canvas.transform, "ExitButton", "ออก", thaiSemi, new Color32(0xE0, 0x5A, 0x4E, 0xFF), 40, 32, 150, 92);
+            // =================== FRAMING OVERLAY (dim, pauses the card) ===================
+            var framing = NewPanel(canvas.transform, "FramingPanel");
+            var framingImg = framing.GetComponent<Image>();
+            framingImg.color = new Color(0.06f, 0.11f, 0.20f, 0.82f);
+            framingImg.raycastTarget = true;
+            AddCard(framing.transform, 113, 560, 700, 320);
+            var framingIcon = AddImage(framing.transform, "FramingIcon", knob, Blue);
+            Place(framingIcon.rectTransform, 423, 600, 80, 80);
+            var framingPromptText = AddText(framing.transform, "ยืนให้กล้องเห็นเต็มตัว", thaiBlack, 48, Ink, TextAlignmentOptions.Center);
+            Place(framingPromptText.rectTransform, 143, 700, 640, 160);
+
+            // =================== EXIT (all states, topmost) ===================
+            var exitBtn = AddPillButton(canvas.transform, "ExitButton", "ออก", thaiSemi, Coral, 787, 30, 100, 76);
             UnityEditor.Events.UnityEventTools.AddPersistentListener(exitBtn.onClick, director.ExitToHome);
             exitBtn.transform.SetAsLastSibling();
-            var feed = canvas.transform.Find("CameraFeedPanel");
-            if (feed != null) feed.SetAsLastSibling();
 
             // ---- Wire the director. ----
             var so = new SerializedObject(director);
+
             AssignGo(so, "introPanel", intro);
             Assign(so, "introTitleText", introTitle);
             Assign(so, "introSubtitleText", introSubtitle);
@@ -186,21 +233,18 @@ namespace Kinex.EditorTools
             Assign(so, "chairSafetyText", chairSafetyText);
 
             AssignGo(so, "hudPanel", hud);
-            Assign(so, "scoreText", scoreText);
-            Assign(so, "streakText", streakText);
-            Assign(so, "streakFlameIcon", streakFlameIcon);
-            Assign(so, "cardCountText", cardCountText);
             Assign(so, "poseNameText", poseNameText);
+            Assign(so, "cardCountText", cardCountText);
             Assign(so, "sectionNameText", sectionNameText);
             Assign(so, "songProgressFill", songFill);
             Assign(so, "countdownRingFill", countdownRingFill);
             Assign(so, "ratingPopupText", ratingPopupText);
-            Assign(so, "tandemWobbleFill", tandemWobbleFill);
+            Assign(so, "referenceImage", referenceImage);
+            Assign(so, "feedbackText", feedbackText);
+            Assign(so, "matchMeterFill", matchMeterFill);
 
-            var heartsProp = so.FindProperty("heartImages");
-            heartsProp.arraySize = heartImages.Length;
-            for (int i = 0; i < heartImages.Length; i++)
-                heartsProp.GetArrayElementAtIndex(i).objectReferenceValue = heartImages[i];
+            AssignGo(so, "framingPanel", framing);
+            Assign(so, "framingPromptText", framingPromptText);
 
             AssignGo(so, "resultsPanel", results);
             Assign(so, "resultsStatsText", statsText);
@@ -210,29 +254,26 @@ namespace Kinex.EditorTools
 
             so.ApplyModifiedPropertiesWithoutUndo();
 
-            // Panels start correct: intro on, everything else off (matches DanceStarDirector.Start's
-            // own ShowOnly(introPanel) call, so the saved scene already looks right before Play).
+            // Panels start correct: intro on, HUD/others off, feed always on (matches director.Start's
+            // ShowOnly(introPanel)). Feed + background stay active behind everything.
+            bg.SetActive(true);
+            feed.SetActive(true);
             intro.SetActive(true);
             calib.SetActive(false);
             chairSafety.SetActive(false);
             hud.SetActive(false);
             results.SetActive(false);
+            framing.SetActive(false);
 
             EditorUtility.SetDirty(director);
             EditorUtility.SetDirty(canvas.gameObject);
             UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(canvas.gameObject.scene);
-            return "Dance Star UI rebuilt and wired to DanceStarDirector.";
+            return "Dance Star UI (2D clinical redesign) rebuilt and wired to DanceStarDirector.";
         }
 
-        // ---- helpers (MirrorGameUIBuilder pattern, plus a couple of small DanceStar-only ones) ----
+        // ---- helpers ----
 
-        static Color StarOff() => new Color(1f, 1f, 1f, 0.22f);
-
-        static void AddStarMotif(Transform parent, float centerX, float centerY, Sprite knob)
-        {
-            var star = AddImage(parent, "StarMotif", knob, Gold);
-            Place(star.rectTransform, centerX - 22, centerY - 22, 44, 44);
-        }
+        static Color StarOff() => new Color(1f, 1f, 1f, 0.35f);
 
         static TMP_FontAsset LoadFont(string path)
         {
@@ -270,19 +311,16 @@ namespace Kinex.EditorTools
             var img = AddImage(parent, "Card", null, color);
             Round(img);
             var shadow = img.gameObject.AddComponent<Shadow>();
-            shadow.effectColor = new Color(0, 0, 0, 0.3f);
-            shadow.effectDistance = new Vector2(0, 6);
+            shadow.effectColor = new Color(0.11f, 0.19f, 0.33f, 0.22f);
+            shadow.effectDistance = new Vector2(0, 5);
             Place(img.rectTransform, x, y, w, h);
             return img.gameObject;
         }
 
-        // Track (dim) + fill (coloured) radial ring pair, reused for the countdown ring and the
-        // tandem wobble gauge. Caller wires the returned fill Image to the director field it needs;
-        // the track is purely decorative.
         static (Image track, Image fill) AddRadialRing(Transform parent, float x, float y, float size, Color color)
         {
             var knob = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/Knob.psd");
-            var track = AddImage(parent, "RingTrack", knob, RingDim);
+            var track = AddImage(parent, "RingTrack", knob, TrackDim);
             Place(track.rectTransform, x, y, size, size);
             var fill = AddImage(parent, "RingFill", knob, color);
             fill.type = Image.Type.Filled;
@@ -294,13 +332,9 @@ namespace Kinex.EditorTools
             return (track, fill);
         }
 
-        // Track (dim) + fill (coloured) horizontal bar pair, reused for calibration progress and
-        // the song progress bar.
         static (Image track, Image fill) AddProgressBar(Transform parent, float x, float y, float w, float h, Color color)
         {
-            // Brighter than RingDim's 0x55 alpha — a near-black bar on the stage's near-black
-            // background at rest (0% fill) was reading as invisible in the HUD screenshot.
-            var track = AddImage(parent, "BarTrack", null, new Color(1f, 1f, 1f, 0.16f));
+            var track = AddImage(parent, "BarTrack", null, new Color(1f, 1f, 1f, 0.28f));
             Round(track);
             Place(track.rectTransform, x, y, w, h);
             var fill = AddImage(parent, "BarFill", null, color);
@@ -321,7 +355,7 @@ namespace Kinex.EditorTools
             img.raycastTarget = true;
             Place(img.rectTransform, x, y, w, h);
             var btn = img.gameObject.AddComponent<Button>();
-            var text = AddText(img.transform, label, font, 42, Color.white, TextAlignmentOptions.Center);
+            var text = AddText(img.transform, label, font, 40, Color.white, TextAlignmentOptions.Center);
             text.fontStyle = FontStyles.Bold;
             Stretch(text.rectTransform);
             return btn;

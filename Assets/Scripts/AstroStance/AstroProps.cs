@@ -100,20 +100,24 @@ namespace Kinex.AstroStance
             return root;
         }
 
+        // Soft dust puff trailing the falling rock (was a fiery ember trail — re-themed for the
+        // sunny-park look). Greyish-tan and gentle, so it reads as kicked-up dust, not fire.
         static void EmberTrail(Transform parent)
         {
-            var go = new GameObject("EmberTrail");
+            var dustNear = new Color(0.72f, 0.66f, 0.55f);
+            var dustFar = new Color(0.55f, 0.50f, 0.42f);
+            var go = new GameObject("DustTrail");
             go.transform.SetParent(parent, false);
             var ps = go.AddComponent<ParticleSystem>();
             var main = ps.main;
-            main.startLifetime = 0.7f;
-            main.startSpeed = 0.4f;
-            main.startSize = new ParticleSystem.MinMaxCurve(0.05f, 0.14f);
-            main.startColor = new ParticleSystem.MinMaxGradient(MeteorOrange, StarGold);
+            main.startLifetime = 0.6f;
+            main.startSpeed = 0.25f;
+            main.startSize = new ParticleSystem.MinMaxCurve(0.08f, 0.18f);
+            main.startColor = new ParticleSystem.MinMaxGradient(dustNear, dustFar);
             main.simulationSpace = ParticleSystemSimulationSpace.World;
-            main.maxParticles = 80;
+            main.maxParticles = 60;
             var emission = ps.emission;
-            emission.rateOverTime = 26f;
+            emission.rateOverTime = 16f;
             var shape = ps.shape;
             shape.shapeType = ParticleSystemShapeType.Sphere;
             shape.radius = 0.30f;
@@ -121,8 +125,8 @@ namespace Kinex.AstroStance
             col.enabled = true;
             var grad = new Gradient();
             grad.SetKeys(
-                new[] { new GradientColorKey(StarGold, 0f), new GradientColorKey(MeteorOrange, 0.6f) },
-                new[] { new GradientAlphaKey(0.9f, 0f), new GradientAlphaKey(0f, 1f) });
+                new[] { new GradientColorKey(dustNear, 0f), new GradientColorKey(dustFar, 0.6f) },
+                new[] { new GradientAlphaKey(0.6f, 0f), new GradientAlphaKey(0f, 1f) });
             col.color = grad;
             var renderer = ps.GetComponent<ParticleSystemRenderer>();
             renderer.material = ParticleMat();

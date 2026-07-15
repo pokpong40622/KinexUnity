@@ -30,10 +30,6 @@ namespace Kinex.AstroStance
         [Tooltip("Raw image-space lane sign → screen-space lanes for the behind view. " +
                  "True is correct for an unmirrored front camera (verified on real feeds).")]
         public bool invertLaneForBackView = true;
-        [Tooltip("Estimated seated hip-drop in torso lengths. Real chair sits measured ~0.37 " +
-                 "with seated torso-shrink eating part of it — 0.30 keeps JustSat reliable. " +
-                 "Must match AstroFeedReplayTest.")]
-        public float shallowSitFactor = 0.30f;
 
         [Header("Avatar")]
         [Tooltip("Wrapper the lane locomotion slides sideways. The character model is its child.")]
@@ -43,6 +39,16 @@ namespace Kinex.AstroStance
         public float laneLerpSpeed = 4f;
         [Tooltip("Body lean into a side-step, degrees.")]
         public float leanDegrees = 7f;
+        [Tooltip("Scales how far the avatar visually slides between lanes (1 = full lane spacing). " +
+                 "Lower = the character moves less side-to-side while the lanes/items stay put. 0.65 " +
+                 "= 35% less travel. Cosmetic only — lane logic/scoring is unchanged.")]
+        public float avatarLaneMoveScale = 0.65f;
+        [Tooltip("How far the avatar's hips drop (metres) while the sit is held. Paired with the " +
+                 "scripted knee bend below so the feet stay planted — together they read as a real " +
+                 "crouch to pick up the tool. 0 = no dip.")]
+        public float sitDipMeters = 0.46f;
+        [Tooltip("Seconds for the sit crouch to fully ease in/out. Lower = snappier.")]
+        public float sitDipSeconds = 0.35f;
 
         [Header("Run")]
         public AstroSpawner spawner;
@@ -101,18 +107,22 @@ namespace Kinex.AstroStance
         const float CountdownSeconds = 3f;
         const float ToastSeconds = 1.5f;
 
-        static readonly Color ChipPass = new Color(0.35f, 0.88f, 0.54f, 0.95f);
-        static readonly Color ChipFail = new Color(0.96f, 0.42f, 0.33f, 0.95f);
-        static readonly Color LaneDotOn = new Color(0.30f, 0.89f, 1.00f);
+        // Bright sunny-park palette (matches AstroStanceUIBuilder). ChipPass/Green, ChipFail/coral,
+        // and the toast/star accents are kept saturated since they sit on solid fills or always
+        // carry a dark outline — StarDim is the one that needed to flip from white to dark ink
+        // since results stars sit on the now-cream ResultsPanel card.
+        static readonly Color ChipPass = new Color(0.32f, 0.70f, 0.36f, 0.95f);
+        static readonly Color ChipFail = new Color(0.95f, 0.45f, 0.34f, 0.95f);
+        static readonly Color LaneDotOn = new Color(0.28f, 0.62f, 0.92f);
         static readonly Color LaneDotOff = new Color(1f, 1f, 1f, 0.25f);
-        static readonly Color ToastGold = new Color(1.00f, 0.82f, 0.33f);
-        static readonly Color ToastOrange = new Color(1.00f, 0.48f, 0.28f);
-        static readonly Color ToastCyan = new Color(0.45f, 0.92f, 1.00f);
-        static readonly Color StarLit = new Color(1.00f, 0.82f, 0.33f);
-        static readonly Color StarDim = new Color(1f, 1f, 1f, 0.18f);
+        static readonly Color ToastGold = new Color(1.00f, 0.76f, 0.20f);
+        static readonly Color ToastOrange = new Color(0.95f, 0.45f, 0.34f);
+        static readonly Color ToastCyan = new Color(0.28f, 0.62f, 0.92f);
+        static readonly Color StarLit = new Color(1.00f, 0.76f, 0.20f);
+        static readonly Color StarDim = new Color(0.14f, 0.20f, 0.12f, 0.18f);
 
         readonly FullBodyGate _fullBody = new FullBodyGate();
-        readonly SitStandDetector _sitStand = new SitStandDetector();
+        readonly AstroSitClassifier _sit = new AstroSitClassifier();
         readonly LegAbductionDetector _sideKick = new LegAbductionDetector();
         readonly LaneDetector _lane = new LaneDetector();
         readonly KeyboardMotionStub _stub = new KeyboardMotionStub();
@@ -129,15 +139,41 @@ namespace Kinex.AstroStance
         float _timeLeft;
         float _toastTimer;
         float _avatarBaseX;
+        float _avatarBaseY;
+        float _sitDip01;   // 0 = standing, 1 = fully dipped into the sit crouch (smoothed)
+        bool _sitHeld;     // true between JustSat and the following JustStood
+        HumanPoseHandler _poseHandler;   // scripted sit crouch (bends knees while the puppet is off)
+        HumanPose _crouchPose;
+        bool _crouchPoseActive;
+        int[] _crouchMuscle;
+        float[] _crouchTarget;
         int _lastLane;
         GameObject _tool;
         AstroResult _result = new AstroResult();
 
+        float _bodyLostTimer; // seconds every joint group has been MISSING (drives the play→framing bounce)
+
         // ---- Motion facade: the one place that switches stub vs live detectors. ----
         bool HasLivePose => poseDetector != null && poseDetector.HasPose;
         bool FullBodyOk => useKeyboardStub ? _stub.IsFullBodyVisible : _fullBody.IsFullBodyVisible;
-        bool JustStood => useKeyboardStub ? _stub.JustStood : _sitStand.JustStood;
-        bool JustSat => useKeyboardStub ? _stub.JustSat : _sitStand.JustSat;
+
+        // Looser than IsFullBodyVisible: every tracked joint GROUP is in frame, but WITHOUT the
+        // standing-height span requirement. Sitting shrinks the nose→ankle span ~30% (below the
+        // shared FullBodyGate's MinBodySpan), which would otherwise read as "too far" and eject the
+        // player to the framing screen the instant they sit — fatal for a sit-to-stand game. During
+        // Play we only care that the body is still THERE, not that it fills a standing frame.
+        bool BodyPresentForPlay
+        {
+            get
+            {
+                if (useKeyboardStub) return _stub.IsFullBodyVisible;
+                var g = _fullBody.GroupOk;
+                for (int i = 0; i < g.Length; i++) if (!g[i]) return false;
+                return true;
+            }
+        }
+        bool JustStood => useKeyboardStub ? _stub.JustStood : _sit.JustStood;
+        bool JustSat => useKeyboardStub ? _stub.JustSat : _sit.JustSat;
         bool JustKickedLeft => useKeyboardStub ? _stub.JustKickedLeft : _sideKick.JustKickedLeft;
         bool JustKickedRight => useKeyboardStub ? _stub.JustKickedRight : _sideKick.JustKickedRight;
         int PlayerLane => useKeyboardStub
@@ -150,9 +186,32 @@ namespace Kinex.AstroStance
             if (!Application.isEditor && poseDetector != null) useKeyboardStub = false;
         }
 
+#if UNITY_EDITOR
+        // EDITOR TEST ONLY: called by AstroTestClipSwitcher when a recording is replayed, so the
+        // replayed pose is actually SCORED. The editor otherwise runs the keyboard stub (no tablet
+        // keyboard on device), which ignores the pose feed — that's why a replayed sit looked
+        // undetected. Jumps straight to a calibrated, live-detector Play state.
+        public void BeginReplayTest()
+        {
+            useKeyboardStub = false;
+            if (poseDetector != null && poseDetector.HasPose)
+            {
+                var kp = poseDetector.LatestKeypoints;
+                _sideKick.SetBaseline(kp);
+                _lane.CalibrateCenter(kp);
+            }
+            _calibrated = true;
+            _bodyLostTimer = 0f;
+            if (framingPanel != null) framingPanel.SetActive(false);
+            if (calibGroup != null) calibGroup.SetActive(false);
+            if (introPanel != null) introPanel.SetActive(false);
+            if (_state != State.Play) { _runStarted = true; EnterPlay(); }
+        }
+#endif
+
         void Start()
         {
-            if (avatarRoot != null) _avatarBaseX = avatarRoot.position.x;
+            if (avatarRoot != null) { _avatarBaseX = avatarRoot.position.x; _avatarBaseY = avatarRoot.position.y; }
             _timeLeft = sessionSeconds;
             if (toastText != null) toastText.text = "";
             if (spawner != null)
@@ -189,12 +248,15 @@ namespace Kinex.AstroStance
             if (useKeyboardStub) { _stub.Tick(dt); return; }
             bool has = HasLivePose;
             _fullBody.Tick(has, has ? poseDetector.Landmarks33 : null, dt);
+            _bodyLostTimer = (has && BodyPresentForPlay) ? 0f : _bodyLostTimer + dt;
             if (!has) return;
-            if (_calibrated && _fullBody.IsFullBodyVisible)
+            // Gate on BodyPresentForPlay (groups visible) NOT IsFullBodyVisible (standing span) so the
+            // detectors keep running while the player is seated — otherwise the sit is never seen.
+            if (_calibrated && BodyPresentForPlay)
             {
                 var kp = poseDetector.LatestKeypoints;
                 var conf = poseDetector.LatestConfidence;
-                _sitStand.Tick(kp, conf, dt);
+                _sit.Tick(kp, conf, dt);
                 _sideKick.Tick(kp, conf, dt);
                 _lane.Tick(kp, conf, dt);
             }
@@ -204,6 +266,7 @@ namespace Kinex.AstroStance
 
         void EnterFraming()
         {
+            EndSitPose(); // never leave the body frozen in the scripted crouch
             _state = State.Framing;
             if (framingPanel != null) framingPanel.SetActive(true);
             if (calibGroup != null) calibGroup.SetActive(false);
@@ -273,9 +336,9 @@ namespace Kinex.AstroStance
         {
             if (!useKeyboardStub && HasLivePose)
             {
+                // Sit/stand is calibration-free now (AstroSitClassifier reads geometry directly),
+                // so only the kick + lane detectors still need a standing baseline captured here.
                 var kp = poseDetector.LatestKeypoints;
-                _sitStand.CalibrateStanding(kp);
-                _sitStand.EstimateSeatedFromStanding(shallowSitFactor);
                 _sideKick.SetBaseline(kp);
                 _lane.CalibrateCenter(kp);
             }
@@ -297,8 +360,9 @@ namespace Kinex.AstroStance
 
         void TickCountdown(float dt)
         {
-            // Losing the body during the countdown bounces back to framing.
-            if (!useKeyboardStub && _fullBody.InvalidSeconds > BodyLostSeconds) { EnterFraming(); return; }
+            // Losing the body during the countdown bounces back to framing (seated span-shrink is
+            // tolerated — only a genuinely missing joint group counts as lost).
+            if (!useKeyboardStub && _bodyLostTimer > BodyLostSeconds) { EnterFraming(); return; }
 
             _countdownLeft -= dt;
             if (countdownText != null)
@@ -326,7 +390,7 @@ namespace Kinex.AstroStance
 
         void TickPlay(float dt)
         {
-            if (!useKeyboardStub && _fullBody.InvalidSeconds > BodyLostSeconds) { EnterFraming(); return; }
+            if (!useKeyboardStub && _bodyLostTimer > BodyLostSeconds) { EnterFraming(); return; }
 
             _timeLeft -= dt;
             UpdateTimerText();
@@ -334,6 +398,7 @@ namespace Kinex.AstroStance
 
             TickLaneMovement(dt);
             TickSitStand();
+            TickSitCrouch();
             TickKicks();
         }
 
@@ -350,11 +415,15 @@ namespace Kinex.AstroStance
                 if (laneDots[i] != null) laneDots[i].color = (i - 1) == lane ? LaneDotOn : LaneDotOff;
 
             if (avatarRoot == null || spawner == null) return;
-            float targetX = _avatarBaseX + spawner.LaneWorldX(lane);
+            float targetX = _avatarBaseX + spawner.LaneWorldX(lane) * avatarLaneMoveScale;
             Vector3 p = avatarRoot.position;
             float newX = Mathf.Lerp(p.x, targetX, 1f - Mathf.Exp(-laneLerpSpeed * dt));
             float vx = (newX - p.x) / Mathf.Max(dt, 1e-4f);
             p.x = newX;
+            // Sit crouch: ease the hips DOWN while the sit is held (the scripted knee bend in
+            // TickSitCrouch bends the legs so the feet stay planted), then rise on standing.
+            _sitDip01 = Mathf.MoveTowards(_sitDip01, _sitHeld ? 1f : 0f, dt / Mathf.Max(sitDipSeconds, 0.01f));
+            p.y = _avatarBaseY - _sitDip01 * sitDipMeters;
             avatarRoot.position = p;
             // Lean into the step, ease back upright when settled.
             float lean = Mathf.Clamp(-vx / 2.5f, -1f, 1f) * leanDegrees;
@@ -367,6 +436,7 @@ namespace Kinex.AstroStance
             if (JustSat)
             {
                 _satThisRep = true;
+                _sitHeld = true; // drives the visible crouch until the next stand
                 var treasure = spawner != null ? spawner.ActiveItem(AstroKind.Treasure, PlayerLane) : null;
                 if (treasure != null && _tool == null)
                 {
@@ -377,6 +447,7 @@ namespace Kinex.AstroStance
 
             if (JustStood)
             {
+                _sitHeld = false; // stood up → release the crouch (avatar eases back upright)
                 // A real rep always has a preceding sit. SitStandDetector boots in Seated with a
                 // standing baseline, so it emits one synthetic JustStood shortly after calibration
                 // — which lands during the Countdown (stands ignored there) OR, if the body wasn't
@@ -399,6 +470,70 @@ namespace Kinex.AstroStance
                 if (_tool != null) DropTool();
             }
         }
+
+        // Scripted sit crouch. The live puppet drives the bones in WORLD space, which cancels any
+        // rotation we add on the root — so to actually bend the knees we hand the body over to the
+        // humanoid MUSCLE system while the sit is held: hips flex, knees bend, a touch of forward
+        // spine = a real squat to pick up the tool. Blends in/out with _sitDip01 (which also lowers
+        // the hips so the bent-knee feet stay planted), then returns the body to the live puppet.
+        void TickSitCrouch()
+        {
+            if (poseDetector == null) return;
+            var anim = poseDetector.AvatarAnimator;
+            if (anim == null || !anim.isHuman) return;
+            if (_poseHandler == null)
+            {
+                _poseHandler = new HumanPoseHandler(anim.avatar, anim.transform);
+                BuildCrouchMuscles();
+            }
+            if (_crouchPose.muscles == null) _poseHandler.GetHumanPose(ref _crouchPose);
+
+            if (_sitDip01 > 0.01f)
+            {
+                if (!_crouchPoseActive) { poseDetector.AvatarDriving = false; _crouchPoseActive = true; }
+                // _crouchPose holds the last STANDING capture (natural arms) — override only the
+                // legs + spine toward the seated pose, blended by the dip so it eases in/out.
+                for (int i = 0; i < _crouchMuscle.Length; i++)
+                    if (_crouchMuscle[i] >= 0)
+                        _crouchPose.muscles[_crouchMuscle[i]] = _crouchTarget[i] * _sitDip01;
+                _poseHandler.SetHumanPose(ref _crouchPose);
+            }
+            else
+            {
+                EndSitPose();
+                // While the puppet drives (standing), keep capturing its pose as the base so the
+                // next sit inherits the player's real arms/torso instead of a stiff T-pose.
+                _poseHandler.GetHumanPose(ref _crouchPose);
+            }
+        }
+
+        void BuildCrouchMuscles()
+        {
+            var names = HumanTrait.MuscleName;
+            System.Func<string, int> mi = s => { for (int i = 0; i < names.Length; i++) if (names[i] == s) return i; return -1; };
+            // A normal seated posture (sit-on-a-chair): thighs up toward horizontal, knees ~90°
+            // (shins vertical), torso upright. Not a deep forward squat.
+            var map = new (string name, float val)[]
+            {
+                ("Left Upper Leg Front-Back", 0.95f), ("Right Upper Leg Front-Back", 0.95f),
+                ("Left Lower Leg Stretch", -0.85f),   ("Right Lower Leg Stretch", -0.85f),
+                ("Spine Front-Back", 0.0f),
+            };
+            _crouchMuscle = new int[map.Length];
+            _crouchTarget = new float[map.Length];
+            for (int i = 0; i < map.Length; i++) { _crouchMuscle[i] = mi(map[i].name); _crouchTarget[i] = map[i].val; }
+        }
+
+        // Hand the body back to the live puppet (called when the crouch fully eases out, or when
+        // play is left mid-sit so the avatar never freezes in the crouch).
+        void EndSitPose()
+        {
+            if (!_crouchPoseActive) return;
+            if (poseDetector != null) poseDetector.AvatarDriving = true;
+            _crouchPoseActive = false;
+        }
+
+        void OnDestroy() => _poseHandler?.Dispose();
 
         void TickKicks()
         {
@@ -430,7 +565,7 @@ namespace Kinex.AstroStance
                         _result.meteorHits++;
                         _result.score--;
                         UpdateScoreText();
-                        ShowToast("−1 โดนอุกกาบาต!", ToastOrange);
+                        ShowToast("−1 โดนก้อนหิน!", ToastOrange);
                         Kinex.Sfx.Play("hit_1", 0.8f);
                         if (shakeTarget != null) StartCoroutine(ShakeRoutine());
                     }
@@ -514,6 +649,7 @@ namespace Kinex.AstroStance
 
         void EndRun()
         {
+            EndSitPose();
             _state = State.Results;
             if (spawner != null) spawner.StopRun();
             if (_tool != null) DropTool();

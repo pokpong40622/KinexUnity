@@ -10,8 +10,9 @@ namespace Kinex.AstroStance.EditorTools
     /// <summary>
     /// One-click builder for the AstroStance UI — same procedural-canvas + SerializedObject-wiring
     /// pattern as TempleHuntUIBuilder. Re-runnable: destroys its own panels by name and rebuilds,
-    /// then wires every AstroStanceDirector field. Dark glass cards with LIGHT text (the 3D scene
-    /// behind is a dark sci-fi stage — white cards would wash out, per the Temple Hunt lesson).
+    /// then wires every AstroStanceDirector field. Bright cream glass cards with DARK ink text
+    /// (the 3D scene behind is now a bright sunny park — dark cards would vanish into the shade,
+    /// so the cards stay light and the text goes dark instead).
     /// CalibGroup is deliberately a CANVAS-level sibling of HudPanel, not nested inside it: the
     /// director activates calibGroup during the Calibrating state, which is BEFORE hudPanel turns
     /// on (that only happens at EnterCountdown) — nesting it under HudPanel would hide it.
@@ -21,24 +22,30 @@ namespace Kinex.AstroStance.EditorTools
         const float FW = 927f, FH = 1427f;
 
         // Palette (matches AstroStanceSceneBuilder / AstroProps where it overlaps).
-        static readonly Color SpaceNavy = new Color(0.0431f, 0.0627f, 0.1490f);   // #0B1026
-        static readonly Color Indigo = new Color(0.1647f, 0.1294f, 0.3765f);      // #2A2160
-        static readonly Color Cyan = new Color(0.3020f, 0.8902f, 1.0000f);        // #4DE3FF
-        static readonly Color Gold = new Color(1.0000f, 0.8196f, 0.3333f);        // #FFD155
-        static readonly Color MeteorOrange = new Color(1.0000f, 0.4196f, 0.2078f);// #FF6B35
-        static readonly Color Green = new Color(0.3451f, 0.8784f, 0.5412f);       // #58E08A
-        static readonly Color OffWhite = new Color(0.9569f, 0.9686f, 1.0000f);    // #F4F7FF
-        static readonly Color IndigoLight = new Color(0.55f, 0.50f, 0.85f);
+        // SpaceNavy was the near-black space bg; it's now the OPAQUE bright panel background
+        // (mint-cream) used for the full-screen Intro / Results / Pause panels so they fully
+        // cover the sunny park scene behind them.
+        static readonly Color SpaceNavy = new Color(0.94f, 0.97f, 0.90f);         // #F0F7E6
+        // Indigo was a dark accent circle behind the intro star; now a soft leaf-green accent.
+        static readonly Color Indigo = new Color(0.55f, 0.72f, 0.40f);            // #8CB866
+        static readonly Color Cyan = new Color(0.28f, 0.62f, 0.92f);              // sky-blue secondary accent
+        static readonly Color Gold = new Color(1.00f, 0.76f, 0.20f);              // sunny gold
+        static readonly Color MeteorOrange = new Color(0.95f, 0.45f, 0.34f);      // warm coral hit/dodge warning
+        static readonly Color Green = new Color(0.32f, 0.70f, 0.36f);             // friendly green
+        static readonly Color OffWhite = new Color(0.14f, 0.20f, 0.12f);          // dark ink (name kept, now the primary TEXT color)
+        static readonly Color IndigoLight = new Color(0.32f, 0.20f, 0.48f);       // deep plum — readable as text on cream, still a distinct accent
         static readonly Color Gray = new Color(0.45f, 0.48f, 0.55f);
-        // Glass cards must read against a near-black 3D stage — a 0.05-luma fill vanished into
-        // the background in the first render. Lift the fill toward indigo and add a faint cyan
-        // rim (AddCard) so every card has a visible edge.
-        static readonly Color GlassBg = new Color(0.12f, 0.15f, 0.30f, 0.94f);
-        static readonly Color CardRim = new Color(0.30f, 0.89f, 1.0f, 0.45f);
-        static readonly Color ScrimDim = new Color(0.0431f, 0.0627f, 0.1490f, 0.75f); // SpaceNavy @ 0.75
-        static readonly Color ScrimHeavy = new Color(0.0431f, 0.0627f, 0.1490f, 0.85f); // SpaceNavy @ 0.85 (Results)
-        static readonly Color RingTrack = new Color(1f, 1f, 1f, 0.18f);
-        static readonly Color DarkText = new Color(0.05f, 0.06f, 0.14f);
+        // Cards must read against a bright sunny-park stage — cream fill with a soft leaf-green
+        // rim (AddCard) so every card still has a visible edge, just like the old dark-glass cards did.
+        static readonly Color GlassBg = new Color(0.99f, 0.99f, 0.96f, 0.95f);
+        static readonly Color CardRim = new Color(0.42f, 0.62f, 0.32f, 0.55f);
+        // Gentle warm-dark translucent overlays used to dim the (bright) scene behind the
+        // Framing / Calibration guidance panels for focus — not opaque, so the camera feed /
+        // park scene still shows through, just dimmed.
+        static readonly Color ScrimDim = new Color(0.15f, 0.20f, 0.12f, 0.45f);
+        static readonly Color ScrimHeavy = new Color(0.15f, 0.20f, 0.12f, 0.65f);
+        static readonly Color RingTrack = new Color(0.5f, 0.5f, 0.5f, 0.30f);
+        static readonly Color DarkText = new Color(0.14f, 0.20f, 0.12f);
 
         const string ThaiBlackPath = "Assets/Fonts/FCIconic-Black SDF.asset";
         const string ThaiSemiPath = "Assets/Fonts/FCIconic-SemiBold SDF.asset";
@@ -75,7 +82,7 @@ namespace Kinex.AstroStance.EditorTools
 
             // =================== INTRO ===================
             var intro = NewPanel(canvas.transform, "IntroPanel");
-            intro.GetComponent<Image>().color = ScrimDim;
+            intro.GetComponent<Image>().color = SpaceNavy;
 
             var ringAccent = AddImage(intro.transform, "TitleRingAccent", knob, new Color(Indigo.r, Indigo.g, Indigo.b, 0.55f));
             Place(ringAccent.rectTransform, 700, 8, 150, 150);
@@ -89,23 +96,25 @@ namespace Kinex.AstroStance.EditorTools
             Place(titleBottom.rectTransform, 0, 172, FW, 118);
             Outline(titleBottom, Cyan, 0.2f);
 
-            var subtitle = AddText(intro.transform, "ภารกิจเก็บสมบัติอวกาศ", thaiSemi, 44, Gold, TextAlignmentOptions.Center);
+            var subtitle = AddText(intro.transform, "ภารกิจเก็บสมบัติในสวน", thaiSemi, 44, DarkText, TextAlignmentOptions.Center);
             Place(subtitle.rectTransform, 64, 305, 799, 70);
 
             BuildHowToCards(intro.transform, thaiSemi, knob);
 
-            var startBtn = AddPillButton(intro.transform, "StartButton", "เริ่มภารกิจ", thaiSemi, Cyan, DarkText, 213, 1250, 500, 120, 56);
+            var startBtn = AddPillButton(intro.transform, "StartButton", "เริ่มภารกิจ", thaiSemi, Cyan, Color.white, 213, 1250, 500, 120, 56);
             UnityEditor.Events.UnityEventTools.AddPersistentListener(startBtn.onClick, director.OnStartPressed);
 
             // =================== FRAMING ===================
             var framing = NewPanel(canvas.transform, "FramingPanel");
-            framing.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0.72f);
+            framing.GetComponent<Image>().color = ScrimHeavy;
 
             AddCard(framing.transform, 94, 280, 740, 640);
             var framingTitle = AddText(framing.transform, "ให้เห็นตัวคุณทั้งตัว", thaiSemi, 52, OffWhite, TextAlignmentOptions.Center);
             Place(framingTitle.rectTransform, 114, 320, 700, 90);
+            // Prompt sits on the cream card (not the dark FramingPanel margin scrim), so it needs
+            // dark ink like the title, not Gold — Gold-on-cream is unreadable.
             var framingPromptText = AddText(framing.transform, "ยังไม่เห็นตัวคุณ — มายืนหน้ากล้องได้เลย",
-                                            thaiSemi, 44, Gold, TextAlignmentOptions.Center);
+                                            thaiSemi, 44, DarkText, TextAlignmentOptions.Center);
             Place(framingPromptText.rectTransform, 114, 430, 700, 90);
 
             string[] chipLabels = { "หัว", "ไหล่", "สะโพก", "เข่า", "เท้า" };
@@ -118,7 +127,7 @@ namespace Kinex.AstroStance.EditorTools
                 float cx = chipStartX + i * (chipSize + chipGap);
                 var chip = AddImage(framing.transform, $"FramingChip{i}", knob, new Color(1f, 1f, 1f, 0.25f));
                 Place(chip.rectTransform, cx, 540, chipSize, chipSize);
-                var chipLabel = AddText(framing.transform, chipLabels[i], thaiSemi, 30, OffWhite, TextAlignmentOptions.Center);
+                var chipLabel = AddText(framing.transform, chipLabels[i], thaiSemi, 30, DarkText, TextAlignmentOptions.Center);
                 Place(chipLabel.rectTransform, cx - 13, 608, chipSize + 26, 40);
                 framingChips[i] = chip;
             }
@@ -135,7 +144,7 @@ namespace Kinex.AstroStance.EditorTools
 
             // =================== CALIBRATION (canvas-level sibling — see class doc) ===================
             var calibGroup = NewPanel(canvas.transform, "CalibGroup");
-            calibGroup.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0.55f);
+            calibGroup.GetComponent<Image>().color = ScrimDim;
             var calibTrack = AddImage(calibGroup.transform, "CalibRingTrack", knob, RingTrack);
             Place(calibTrack.rectTransform, 383, 560, 160, 160);
             var calibRing = AddImage(calibGroup.transform, "CalibRingFill", knob, Cyan);
@@ -145,7 +154,9 @@ namespace Kinex.AstroStance.EditorTools
             calibRing.fillClockwise = true;
             calibRing.fillAmount = 0f;
             Place(calibRing.rectTransform, 383, 560, 160, 160);
-            var calibText = AddText(calibGroup.transform, "ยืนตรง นิ่ง ๆ 2 วินาที", thaiSemi, 48, OffWhite, TextAlignmentOptions.Center);
+            // CalibGroup has no card behind it — it sits directly on the dark ScrimDim overlay,
+            // so this stays white (not dark ink) for contrast.
+            var calibText = AddText(calibGroup.transform, "ยืนตรง นิ่ง ๆ 2 วินาที", thaiSemi, 48, Color.white, TextAlignmentOptions.Center);
             Place(calibText.rectTransform, 114, 740, 700, 70);
 
             // =================== HUD ===================
@@ -216,7 +227,7 @@ namespace Kinex.AstroStance.EditorTools
 
             // =================== PAUSE ===================
             var pause = NewPanel(canvas.transform, "PausePanel");
-            pause.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0.75f);
+            pause.GetComponent<Image>().color = SpaceNavy;
             AddCard(pause.transform, 94, 480, 740, 400);
             var pauseTitle = AddText(pause.transform, "พักเกม", thaiBlack, 64, OffWhite, TextAlignmentOptions.Center);
             Place(pauseTitle.rectTransform, 114, 520, 700, 110);
@@ -227,13 +238,13 @@ namespace Kinex.AstroStance.EditorTools
 
             // =================== RESULTS ===================
             var results = NewPanel(canvas.transform, "ResultsPanel");
-            results.GetComponent<Image>().color = ScrimHeavy;
+            results.GetComponent<Image>().color = SpaceNavy;
             AddCard(results.transform, 54, 110, 819, 1210);
-            var resultsTitle = AddText(results.transform, "ภารกิจสำเร็จ!", thaiBlack, 72, Gold, TextAlignmentOptions.Center);
+            var resultsTitle = AddText(results.transform, "ภารกิจสำเร็จ!", thaiBlack, 72, DarkText, TextAlignmentOptions.Center);
             Place(resultsTitle.rectTransform, 94, 150, 740, 110);
             Outline(resultsTitle, new Color(0f, 0f, 0f, 0.6f), 0.2f);
 
-            var resultScoreText = AddText(results.transform, "0", montserratBlack, 140, Gold, TextAlignmentOptions.Center);
+            var resultScoreText = AddText(results.transform, "0", montserratBlack, 140, DarkText, TextAlignmentOptions.Center);
             Place(resultScoreText.rectTransform, 94, 280, 740, 170);
             var scoreLabel = AddText(results.transform, "คะแนน", thaiSemi, 40, OffWhite, TextAlignmentOptions.Center);
             Place(scoreLabel.rectTransform, 94, 460, 740, 60);
@@ -244,16 +255,19 @@ namespace Kinex.AstroStance.EditorTools
             float starStartX = (FW - starsTotalW) * 0.5f;
             for (int i = 0; i < 3; i++)
             {
-                var star = AddImage(results.transform, $"ResultStar{i}", knob, new Color(1f, 1f, 1f, 0.18f));
+                var star = AddImage(results.transform, $"ResultStar{i}", knob, new Color(0.14f, 0.20f, 0.12f, 0.18f));
                 Place(star.rectTransform, starStartX + i * (starSize + starGap), 540, starSize, starSize);
                 resultStars[i] = star;
             }
 
+            // Rows double as the icon fill AND the value-text color, so each tone is darkened
+            // enough to stay readable as text on the cream results card (plain Gold/Cyan/Green
+            // read fine as icon fills but wash out as text on cream).
             (string label, Color color)[] repRows =
             {
-                ("สมบัติที่เก็บ", Gold),
-                ("เตะโดน", Cyan),
-                ("หลบอุกกาบาต", Green),
+                ("สมบัติที่เก็บ", new Color(0.68f, 0.46f, 0.04f)),   // deep amber (was Gold)
+                ("เตะโดน", new Color(0.08f, 0.32f, 0.62f)),          // deep sky-blue (was Cyan)
+                ("หลบก้อนหิน", new Color(0.10f, 0.40f, 0.16f)),      // deep green (was Green)
                 ("ลุก-นั่ง", OffWhite),
                 ("ก้าวข้าง", IndigoLight),
             };
@@ -270,7 +284,7 @@ namespace Kinex.AstroStance.EditorTools
                 resultRepValues[i] = value;
             }
 
-            var playAgainBtn = AddPillButton(results.transform, "PlayAgainButton", "เล่นอีกครั้ง", thaiSemi, Cyan, DarkText, 150, 1210, 300, 110, 42);
+            var playAgainBtn = AddPillButton(results.transform, "PlayAgainButton", "เล่นอีกครั้ง", thaiSemi, Cyan, Color.white, 150, 1210, 300, 110, 42);
             UnityEditor.Events.UnityEventTools.AddPersistentListener(playAgainBtn.onClick, director.OnPlayAgainPressed);
             var exitFromResultsBtn = AddPillButton(results.transform, "ExitFromResultsButton", "กลับหน้าหลัก", thaiSemi, Gray, Color.white, 480, 1210, 300, 110, 42);
             UnityEditor.Events.UnityEventTools.AddPersistentListener(exitFromResultsBtn.onClick, director.OnExitPressed);
@@ -322,7 +336,7 @@ namespace Kinex.AstroStance.EditorTools
             return "AstroStance UI rebuilt and wired to AstroStanceDirector.";
         }
 
-        // ---- 3 how-to cards: side-step / sit-stand / kick, each a dark glass card with a
+        // ---- 3 how-to cards: side-step / sit-stand / kick, each a bright cream card with a
         // small pictogram built from primitive shapes + a Thai caption. ----
         static void BuildHowToCards(Transform parent, TMP_FontAsset thaiSemi, Sprite knob)
         {
@@ -330,7 +344,7 @@ namespace Kinex.AstroStance.EditorTools
             float[] xs = { 29f, 328f, 627f };
             string[] captions =
             {
-                "ก้าวข้าง หลบอุกกาบาต",
+                "ก้าวข้าง หลบก้อนหิน",
                 "นั่งแล้วลุก เก็บสมบัติ",
                 "เตะวงแหวนจากเลนข้าง ๆ",
             };
@@ -462,8 +476,8 @@ namespace Kinex.AstroStance.EditorTools
 
         static GameObject AddCard(Transform parent, float x, float y, float w, float h)
         {
-            // Faint cyan rim first (a slightly larger card behind), then the glass fill on top —
-            // gives every card a visible edge against the dark stage without a real 9-slice border.
+            // Faint leaf-green rim first (a slightly larger card behind), then the cream fill on top —
+            // gives every card a visible edge against the bright park stage without a real 9-slice border.
             var rim = AddImage(parent, "CardRim", null, CardRim);
             Round(rim);
             Place(rim.rectTransform, x - 2f, y - 2f, w + 4f, h + 4f);

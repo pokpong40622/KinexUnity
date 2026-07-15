@@ -15,7 +15,7 @@ namespace Kinex.AstroStance
     {
         [Header("Lanes (screen space: -1 left, +1 right)")]
         [Tooltip("World X distance between adjacent lanes. Lane world x = lane * laneSpacing.")]
-        public float laneSpacing = 1.5f;
+        public float laneSpacing = 1.0f;
         [Tooltip("World Z where objects land — ahead of the player line so the behind view reads depth.")]
         public float impactZ = 1.8f;
 

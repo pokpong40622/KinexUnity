@@ -63,6 +63,9 @@ namespace Kinex.DanceStar
         public float calibSeatedSeconds = 1.5f;
         public float calibTimeoutSeconds = 8f;
         const float TandemHoldTargetSeconds = 8f;
+        // Max time a single card waits (paused) for the camera to see the whole body before it gives
+        // up and lets the window run out — stops a misfiring framing gate from soft-locking a card.
+        const float FramingPauseCap = 20f;
 
         [Header("UI - Intro")]
         public GameObject introPanel;
@@ -93,6 +96,17 @@ namespace Kinex.DanceStar
         [Tooltip("Optional stillness/wobble meter for tandem-stand cards.")]
         public Image tandemWobbleFill;
 
+        [Header("UI - Reference & feedback (2D redesign)")]
+        [Tooltip("Top-left reference figure — the pose to copy (Resources/DanceStarRef/<poseName>).")]
+        public Image referenceImage;
+        [Tooltip("Live coaching line shown near the camera feed during a card window.")]
+        public TMP_Text feedbackText;
+        [Tooltip("Top-right meter that fills while the current pose is held / reps accumulate.")]
+        public Image matchMeterFill;
+        [Tooltip("Dim overlay shown when the camera can't see the whole body; pauses the card timer.")]
+        public GameObject framingPanel;
+        public TMP_Text framingPromptText;
+
         [Header("UI - Results")]
         public GameObject resultsPanel;
         public Image[] resultsStarImages;
@@ -121,6 +135,7 @@ namespace Kinex.DanceStar
         readonly LaneDetector _lane = new LaneDetector();
         readonly SitStandDetector _sitStand = new SitStandDetector();
         readonly PoseGate _gate = new PoseGate();
+        readonly FullBodyGate _fullBody = new FullBodyGate();
         readonly KeyboardMotionStub _stub = new KeyboardMotionStub();
 
         // DanceStar-local checks (not in the frozen Motion layer — same precedent as TempleLogic).
@@ -293,16 +308,22 @@ namespace Kinex.DanceStar
         IEnumerator RunCard(DanceCard card, int index, int total)
         {
             _state = State.CardAnnounce;
-            int poseIdx = FindPoseIndex(card.poseAssetName);
-            if (poseIdx >= 0) trainer?.ShowPose(poseIdx);
-            else Debug.LogWarning($"[DanceStarDirector] pose '{card.poseAssetName}' not found in " +
-                                   "DancePoseData — trainer demo skipped for this card, game continues.");
+            ShowReference(card);
+            // The runtime scene has no trainer rig in the 2D redesign; keep the demo hook for any
+            // scene that still wires one, but never warn when there simply isn't a trainer.
+            if (trainer != null)
+            {
+                int poseIdx = FindPoseIndex(card.poseAssetName);
+                if (poseIdx >= 0) trainer.ShowPose(poseIdx);
+            }
 
-            if (cardCountText != null) cardCountText.text = $"การ์ดที่ {index + 1}/{total}";
+            if (cardCountText != null) cardCountText.text = $"ท่าที่ {index + 1}/{total}";
             if (_gameHud != null) _gameHud.SetSubLabel($"{index + 1}/{total}");
             if (poseNameText != null) poseNameText.text = card.displayNameThai;
             if (songProgressFill != null) songProgressFill.fillAmount = index / (float)Mathf.Max(1, total);
+            if (matchMeterFill != null) matchMeterFill.fillAmount = 0f;
             if (ratingPopupText != null) ratingPopupText.gameObject.SetActive(false);
+            SetFeedback("ทำท่าตามรูป");
             Kinex.Sfx.Play("whoosh", 0.6f);
             Speak(card.displayNameThai);
             yield return new WaitForSeconds(announceSeconds);
@@ -313,6 +334,8 @@ namespace Kinex.DanceStar
             if (card.cardType == DanceCardType.ChairRep) yield return RunChairRepCard(card);
             else yield return RunHoldOrBeatCard(card);
 
+            if (framingPanel != null) framingPanel.SetActive(false);
+            SetFeedback("");
             ApplyRating(_lastCardRating);
             yield return new WaitForSeconds(_lastCardRating == DanceScoring.Rating.Miss ? missPauseSeconds : cardCelebrateSeconds);
         }
@@ -320,16 +343,27 @@ namespace Kinex.DanceStar
         IEnumerator RunHoldOrBeatCard(DanceCard card)
         {
             float requiredHold = card.cardType == DanceCardType.Beat ? 0.15f : 0.6f;
-            float t = 0f, matchStartTime = -1f, holdAccum = 0f;
+            float t = 0f, matchStartTime = -1f, holdAccum = 0f, paused = 0f;
             bool matched = false;
 
             while (t < card.windowSeconds)
             {
-                if (EvaluateCondition(card))
+                // Pause the window while the camera can't see the whole body — don't auto-miss —
+                // but give up after FramingPauseCap so a misfiring gate can't hang the card.
+                if (UpdateFramingPanel())
+                {
+                    paused += Time.deltaTime;
+                    if (paused < FramingPauseCap) { yield return null; continue; }
+                }
+
+                bool cond = EvaluateCondition(card);
+                if (cond)
                 {
                     if (matchStartTime < 0f) matchStartTime = t;
                     holdAccum += Time.deltaTime;
                 }
+                SetFeedback(cond ? "ค้างไว้!" : "ทำท่าตามรูป");
+                if (matchMeterFill != null) matchMeterFill.fillAmount = Mathf.Clamp01(holdAccum / Mathf.Max(requiredHold, 0.01f));
                 if (countdownRingFill != null) countdownRingFill.fillAmount = Mathf.Clamp01(1f - t / card.windowSeconds);
                 if (holdAccum >= requiredHold) { matched = true; break; }
                 t += Time.deltaTime;
@@ -345,14 +379,23 @@ namespace Kinex.DanceStar
         IEnumerator RunChairRepCard(DanceCard card)
         {
             int baseline = RawRepCount(card.detector);
-            float t = 0f;
+            float t = 0f, paused = 0f;
             int reps = 0;
 
             while (t < card.windowSeconds && reps < card.targetReps)
             {
+                if (UpdateFramingPanel())
+                {
+                    paused += Time.deltaTime;
+                    if (paused < FramingPauseCap) { yield return null; continue; }
+                }
+
                 reps = Mathf.Max(0, RawRepCount(card.detector) - baseline);
-                if (countdownRingFill != null)
-                    countdownRingFill.fillAmount = Mathf.Clamp01(reps / (float)Mathf.Max(1, card.targetReps));
+                int remain = Mathf.Max(0, card.targetReps - reps);
+                SetFeedback(remain > 0 ? $"อีก {remain} ครั้ง" : "เยี่ยมมาก!");
+                float rep01 = Mathf.Clamp01(reps / (float)Mathf.Max(1, card.targetReps));
+                if (countdownRingFill != null) countdownRingFill.fillAmount = rep01;
+                if (matchMeterFill != null) matchMeterFill.fillAmount = rep01;
                 t += Time.deltaTime;
                 yield return null;
             }
@@ -457,6 +500,7 @@ namespace Kinex.DanceStar
 
             bool has = HasLivePose;
             _gate.Tick(has, has ? poseDetector.LatestConfidence : null, dt);
+            _fullBody.Tick(has, has ? poseDetector.Landmarks33 : null, dt);
             if (!has || !_gate.Visible) return;
 
             var kp = poseDetector.LatestKeypoints;
@@ -566,6 +610,46 @@ namespace Kinex.DanceStar
                 if (trainer.PoseName(i) == poseAssetName) return i;
             return -1;
         }
+
+        // Loads the top-left reference figure for a card (Resources/DanceStarRef/<poseName>).
+        void ShowReference(DanceCard card)
+        {
+            if (referenceImage == null) return;
+            var sprite = Resources.Load<Sprite>($"DanceStarRef/{card.poseAssetName}");
+            referenceImage.sprite = sprite;
+            referenceImage.enabled = sprite != null;
+            if (sprite == null)
+                Debug.LogWarning($"[DanceStarDirector] reference figure 'DanceStarRef/{card.poseAssetName}' " +
+                                 "not found — run Kinex/Capture Dance Star Reference Figures.");
+        }
+
+        void SetFeedback(string line)
+        {
+            if (feedbackText != null) feedbackText.text = line;
+        }
+
+        // Toggles the framing overlay from the full-body gate. Returns TRUE when the card timer should
+        // PAUSE (body not fully visible) so a card can't auto-miss while the camera has lost the user.
+        // A short invalid grace (0.6s) avoids flicker on a single dropped frame.
+        bool UpdateFramingPanel()
+        {
+            bool blocked = !useKeyboardStub && poseDetector != null && _fullBody.InvalidSeconds > 0.6f;
+            if (framingPanel != null) framingPanel.SetActive(blocked);
+            if (blocked && framingPromptText != null) framingPromptText.text = FramingPrompt(_fullBody.Why);
+            return blocked;
+        }
+
+        static string FramingPrompt(FullBodyGate.Reason why) => why switch
+        {
+            FullBodyGate.Reason.NotFound => "ยืนให้กล้องเห็นตัวคุณ",
+            FullBodyGate.Reason.FeetCut => "ถอยหลังอีกนิด ให้เห็นถึงเท้า",
+            FullBodyGate.Reason.HeadCut => "ก้มกล้องลงให้เห็นศีรษะ",
+            FullBodyGate.Reason.TooClose => "ถอยหลังอีกนิดนะครับ",
+            FullBodyGate.Reason.TooFar => "เข้าใกล้กล้องอีกนิด",
+            FullBodyGate.Reason.OffCenter => "ขยับมาตรงกลางจอ",
+            FullBodyGate.Reason.PartlyHidden => "ยืนให้กล้องเห็นเต็มตัว",
+            _ => "ยืนให้กล้องเห็นเต็มตัว",
+        };
 
         void UpdateHeartsUI()
         {

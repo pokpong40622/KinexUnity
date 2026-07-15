@@ -68,38 +68,5 @@ namespace Kinex.FX
             if (Application.isPlaying) Object.Destroy(obj);
             else Object.DestroyImmediate(obj);
         }
-
-        /// <summary>
-        /// Sine-path drift + wing flap, both driven off Time.time. Like CloudDrift/AmbientMotes,
-        /// this only animates once the ParticleSystem-free Update loop actually ticks — the
-        /// builder's single-frame edit-mode screenshot won't show motion, only runtime play will.
-        /// </summary>
-        class FlutterMotion : MonoBehaviour
-        {
-            public Transform wingL, wingR;
-            public Vector3 rangeBox = new Vector3(2f, 0.6f, 2f);
-            public Vector3 startPos;
-
-            float _phase;
-            const float FlapSpeed = 9f;
-
-            void Awake() => _phase = Random.Range(0f, Mathf.PI * 2f); // desync multiple butterflies
-
-            void Update()
-            {
-                float t = Time.time + _phase;
-                var offset = new Vector3(
-                    Mathf.Sin(t * 0.6f) * rangeBox.x,
-                    Mathf.Sin(t * 1.3f) * rangeBox.y * 0.5f + rangeBox.y * 0.5f,
-                    Mathf.Cos(t * 0.4f) * rangeBox.z);
-                transform.position = startPos + offset;
-                transform.rotation = Quaternion.LookRotation(
-                    new Vector3(Mathf.Cos(t * 0.6f) * 0.6f, 0f, -Mathf.Sin(t * 0.4f) * 0.4f + 0.1f));
-
-                float flap = Mathf.Abs(Mathf.Sin(t * FlapSpeed)) * 60f + 10f; // 10-70 degrees open
-                if (wingL != null) wingL.localRotation = Quaternion.Euler(0f, flap, 0f);
-                if (wingR != null) wingR.localRotation = Quaternion.Euler(0f, -flap, 0f);
-            }
-        }
     }
 }
