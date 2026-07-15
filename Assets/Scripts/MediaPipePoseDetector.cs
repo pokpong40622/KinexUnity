@@ -93,6 +93,12 @@ public class MediaPipePoseDetector : MonoBehaviour
              "flipX = left/right (arms on wrong side), flipZ = front/back (leans the wrong way), " +
              "flipY = up/down. Defaults match the validated webcam setup.")]
     [SerializeField] bool flipX = false;  // cross-side arm/leg mapping already corrects laterality; flipX=true was double-mirroring
+    [Tooltip("Swap the cross-side (mirror) limb mapping to SAME-side. For scenes that show the " +
+             "avatar from BEHIND (AstroStance): viewed from the back, mirror semantics become " +
+             "'follow me', so the player's right limb must drive the avatar's right limb. " +
+             "Default OFF — front-facing scenes are unchanged.")]
+    [SerializeField] bool sameSideRetarget = false;
+    public bool SameSideRetarget => sameSideRetarget;
     [SerializeField] bool flipY = true;   // Android front cam: body needs Y-flip to appear upright
     [SerializeField] bool flipZ = false;
 
@@ -829,19 +835,24 @@ public class MediaPipePoseDetector : MonoBehaviour
         // On a front camera the image is already mirrored, so the COCO "left" shoulder is on
         // the user's RIGHT side in the frame. Driving avatar-Left from COCO-Right (and vice
         // versa) makes the avatar echo what the user is actually doing.
-        TryDrive(HumanBodyBones.LeftUpperArm,  kp, conf, R_SHOULDER, R_ELBOW, t, followStrength);
-        TryDrive(HumanBodyBones.LeftLowerArm,  kp, conf, R_ELBOW,    R_WRIST, t, followStrength);
-        TryDrive(HumanBodyBones.RightUpperArm, kp, conf, L_SHOULDER, L_ELBOW, t, followStrength);
-        TryDrive(HumanBodyBones.RightLowerArm, kp, conf, L_ELBOW,    L_WRIST, t, followStrength);
+        // sameSideRetarget (back-view scenes) swaps which COCO side feeds each avatar limb.
+        int aSho2 = sameSideRetarget ? L_SHOULDER : R_SHOULDER, aElb2 = sameSideRetarget ? L_ELBOW : R_ELBOW, aWri2 = sameSideRetarget ? L_WRIST : R_WRIST;
+        int bSho2 = sameSideRetarget ? R_SHOULDER : L_SHOULDER, bElb2 = sameSideRetarget ? R_ELBOW : L_ELBOW, bWri2 = sameSideRetarget ? R_WRIST : L_WRIST;
+        TryDrive(HumanBodyBones.LeftUpperArm,  kp, conf, aSho2, aElb2, t, followStrength);
+        TryDrive(HumanBodyBones.LeftLowerArm,  kp, conf, aElb2, aWri2, t, followStrength);
+        TryDrive(HumanBodyBones.RightUpperArm, kp, conf, bSho2, bElb2, t, followStrength);
+        TryDrive(HumanBodyBones.RightLowerArm, kp, conf, bElb2, bWri2, t, followStrength);
 
         if (!armsOnly)
         {
             // Legs follow at a reduced strength (legSensitivity) — they're the noisiest joints.
             float legStr = followStrength * legSensitivity;
-            TryDrive(HumanBodyBones.LeftUpperLeg,  kp, conf, R_HIP,  R_KNEE,  t, legStr);
-            TryDrive(HumanBodyBones.LeftLowerLeg,  kp, conf, R_KNEE, R_ANKLE, t, legStr);
-            TryDrive(HumanBodyBones.RightUpperLeg, kp, conf, L_HIP,  L_KNEE,  t, legStr);
-            TryDrive(HumanBodyBones.RightLowerLeg, kp, conf, L_KNEE, L_ANKLE, t, legStr);
+            int aHip2 = sameSideRetarget ? L_HIP : R_HIP, aKne2 = sameSideRetarget ? L_KNEE : R_KNEE, aAnk2 = sameSideRetarget ? L_ANKLE : R_ANKLE;
+            int bHip2 = sameSideRetarget ? R_HIP : L_HIP, bKne2 = sameSideRetarget ? R_KNEE : L_KNEE, bAnk2 = sameSideRetarget ? R_ANKLE : L_ANKLE;
+            TryDrive(HumanBodyBones.LeftUpperLeg,  kp, conf, aHip2, aKne2, t, legStr);
+            TryDrive(HumanBodyBones.LeftLowerLeg,  kp, conf, aKne2, aAnk2, t, legStr);
+            TryDrive(HumanBodyBones.RightUpperLeg, kp, conf, bHip2, bKne2, t, legStr);
+            TryDrive(HumanBodyBones.RightLowerLeg, kp, conf, bKne2, bAnk2, t, legStr);
             ApplyHipSway(kp, conf, t);
         }
     }
@@ -1005,19 +1016,24 @@ public class MediaPipePoseDetector : MonoBehaviour
             TryDriveMid3D  (HumanBodyBones.Neck,  MP_L_SHOULDER, MP_R_SHOULDER, MP_NOSE, followStrength);
         }
 
-        // Arms — cross-side (selfie/front cam): avatar-Left from MediaPipe-Right and vice versa.
-        TryDrive3D(HumanBodyBones.LeftUpperArm,  MP_R_SHOULDER, MP_R_ELBOW, followStrength);
-        TryDrive3D(HumanBodyBones.LeftLowerArm,  MP_R_ELBOW,    MP_R_WRIST, followStrength);
-        TryDrive3D(HumanBodyBones.RightUpperArm, MP_L_SHOULDER, MP_L_ELBOW, followStrength);
-        TryDrive3D(HumanBodyBones.RightLowerArm, MP_L_ELBOW,    MP_L_WRIST, followStrength);
+        // Arms — cross-side (selfie/front cam) by default: avatar-Left from MediaPipe-Right.
+        // sameSideRetarget (back-view scenes) swaps to same-side so the avatar 'follows' instead.
+        int aSho = sameSideRetarget ? MP_L_SHOULDER : MP_R_SHOULDER, aElb = sameSideRetarget ? MP_L_ELBOW : MP_R_ELBOW, aWri = sameSideRetarget ? MP_L_WRIST : MP_R_WRIST;
+        int bSho = sameSideRetarget ? MP_R_SHOULDER : MP_L_SHOULDER, bElb = sameSideRetarget ? MP_R_ELBOW : MP_L_ELBOW, bWri = sameSideRetarget ? MP_R_WRIST : MP_L_WRIST;
+        TryDrive3D(HumanBodyBones.LeftUpperArm,  aSho, aElb, followStrength);
+        TryDrive3D(HumanBodyBones.LeftLowerArm,  aElb, aWri, followStrength);
+        TryDrive3D(HumanBodyBones.RightUpperArm, bSho, bElb, followStrength);
+        TryDrive3D(HumanBodyBones.RightLowerArm, bElb, bWri, followStrength);
 
         if (!armsOnly)
         {
             float legStr = followStrength * legSensitivity;
-            TryDrive3D(HumanBodyBones.LeftUpperLeg,  MP_R_HIP,  MP_R_KNEE,  legStr);
-            TryDrive3D(HumanBodyBones.LeftLowerLeg,  MP_R_KNEE, MP_R_ANKLE, legStr);
-            TryDrive3D(HumanBodyBones.RightUpperLeg, MP_L_HIP,  MP_L_KNEE,  legStr);
-            TryDrive3D(HumanBodyBones.RightLowerLeg, MP_L_KNEE, MP_L_ANKLE, legStr);
+            int aHip = sameSideRetarget ? MP_L_HIP : MP_R_HIP, aKne = sameSideRetarget ? MP_L_KNEE : MP_R_KNEE, aAnk = sameSideRetarget ? MP_L_ANKLE : MP_R_ANKLE;
+            int bHip = sameSideRetarget ? MP_R_HIP : MP_L_HIP, bKne = sameSideRetarget ? MP_R_KNEE : MP_L_KNEE, bAnk = sameSideRetarget ? MP_R_ANKLE : MP_L_ANKLE;
+            TryDrive3D(HumanBodyBones.LeftUpperLeg,  aHip, aKne, legStr);
+            TryDrive3D(HumanBodyBones.LeftLowerLeg,  aKne, aAnk, legStr);
+            TryDrive3D(HumanBodyBones.RightUpperLeg, bHip, bKne, legStr);
+            TryDrive3D(HumanBodyBones.RightLowerLeg, bKne, bAnk, legStr);
             ApplyHipSway(LatestKeypoints, LatestConfidence, minBoneVisibility); // sway still from the stable 2D hip-center
         }
     }

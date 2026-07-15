@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AstroStance — Logo &amp; Banner</title>
+<style>
+  :root {
+    --navy-deep: #0B1026;
+    --indigo: #2A2160;
+    --gold: #FFD155;
+    --cyan: #4DE3FF;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    min-height: 100vh;
+    background-color: #1b1b1f;
+    background-image:
+      linear-gradient(45deg, #262629 25%, transparent 25%),
+      linear-gradient(-45deg, #262629 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #262629 75%),
+      linear-gradient(-45deg, transparent 75%, #262629 75%);
+    background-size: 28px 28px;
+    background-position: 0 0, 0 14px, 14px -14px, -14px 0px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 56px;
+    padding: 64px 24px;
+    font-family: 'Segoe UI', 'Kanit', sans-serif;
+  }
+
+  .stage-label {
+    color: #8b8fa3;
+    font-size: 13px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+    text-align: center;
+  }
+
+  .stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  /* ─── Shared emblem language ─────────────────────────────────────────── */
+
+  .emblem-glow {
+    position: absolute;
+    inset: -34px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(77,227,255,0.45), rgba(77,227,255,0) 68%);
+    filter: blur(4px);
+  }
+
+  .emblem-ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 10px solid var(--gold);
+    box-shadow:
+      0 0 22px rgba(255, 209, 85, 0.65),
+      inset 0 0 14px rgba(255, 209, 85, 0.45);
+  }
+
+  .emblem-dome {
+    position: absolute;
+    inset: 22px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 34% 28%, #454b93 0%, #1c1e42 62%, #101226 100%);
+    box-shadow: inset 0 0 34px rgba(0,0,0,0.65), inset 0 -10px 24px rgba(0,0,0,0.4);
+    overflow: hidden;
+  }
+
+  .emblem-visor {
+    position: absolute;
+    left: 13%;
+    right: 13%;
+    top: 24%;
+    height: 32%;
+    border-radius: 50% 50% 46% 46% / 65% 65% 35% 35%;
+    background: linear-gradient(160deg, rgba(255,255,255,0.92) 0%, var(--cyan) 42%, #1c7fa3 100%);
+    box-shadow: 0 0 16px rgba(77,227,255,0.75);
+  }
+
+  .emblem-visor::after {
+    content: '';
+    position: absolute;
+    left: 10%;
+    top: 14%;
+    width: 26%;
+    height: 26%;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.85);
+    filter: blur(2px);
+  }
+
+  .emblem-spark {
+    position: absolute;
+    border-radius: 50%;
+    background: var(--gold);
+    box-shadow: 0 0 8px rgba(255,209,85,0.9);
+  }
+
+  /* ─── #icon — 512×512 app icon ───────────────────────────────────────── */
+
+  #icon {
+    position: relative;
+    width: 512px;
+    height: 512px;
+    overflow: hidden;
+    border-radius: 96px;
+    background:
+      radial-gradient(circle at 50% 36%, rgba(77,227,255,0.32) 0%, rgba(77,227,255,0) 55%),
+      linear-gradient(135deg, var(--navy-deep) 0%, var(--indigo) 100%);
+    box-shadow:
+      0 24px 64px rgba(0,0,0,0.55),
+      inset 0 0 0 2px rgba(255,255,255,0.07);
+  }
+
+  #icon .star-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 1px;
+    height: 1px;
+    border-radius: 50%;
+    background: transparent;
+  }
+
+  #icon .star-bright {
+    box-shadow:
+    114px 25px 0 0.74px rgba(255,255,255,0.77),
+    142px 104px 0 0.71px rgba(255,255,255,0.97),
+    89px 432px 0 0.32px rgba(255,255,255,0.73),
+    238px 27px 0 0.64px rgba(255,255,255,0.91),
+    429px 225px 0 0.57px rgba(255,255,255,0.78),
+    6px 163px 0 0.72px rgba(255,255,255,0.80),
+    159px 220px 0 0.87px rgba(255,255,255,0.80),
+    94px 389px 0 0.36px rgba(255,255,255,0.95),
+    270px 44px 0 0.74px rgba(255,255,255,0.86),
+    387px 80px 0 0.63px rgba(255,255,255,0.95),
+    370px 196px 0 0.72px rgba(255,255,255,0.71),
+    233px 296px 0 0.89px rgba(255,255,255,0.96),
+    103px 389px 0 0.47px rgba(255,255,255,0.89),
+    373px 166px 0 0.52px rgba(255,255,255,0.76),
+    273px 73px 0 0.67px rgba(255,255,255,0.75),
+    250px 167px 0 0.58px rgba(255,255,255,0.78),
+    224px 332px 0 0.81px rgba(255,255,255,0.93),
+    234px 32px 0 0.78px rgba(255,255,255,0.82),
+    67px 216px 0 0.85px rgba(255,255,255,0.87),
+    322px 217px 0 0.69px rgba(255,255,255,0.82),
+    469px 146px 0 0.46px rgba(255,255,255,0.77),
+    269px 438px 0 0.84px rgba(255,255,255,0.82),
+    224px 141px 0 0.61px rgba(255,255,255,0.73),
+    48px 112px 0 0.39px rgba(255,255,255,0.75),
+    432px 65px 0 0.53px rgba(255,255,255,0.88),
+    479px 257px 0 0.88px rgba(255,255,255,0.96);
+  }
+
+  #icon .star-faint {
+    box-shadow:
+    11px 117px 0 0.37px rgba(255,255,255,0.41),
+    273px 348px 0 0.14px rgba(255,255,255,0.38),
+    464px 3px 0 0.48px rgba(255,255,255,0.51),
+    269px 512px 0 0.40px rgba(255,255,255,0.40),
+    108px 305px 0 0.44px rgba(255,255,255,0.40),
+    203px 156px 0 0.25px rgba(255,255,255,0.30),
+    0px 331px 0 0.30px rgba(255,255,255,0.28),
+    371px 314px 0 0.20px rgba(255,255,255,0.32),
+    80px 87px 0 0.39px rgba(255,255,255,0.49),
+    128px 131px 0 0.36px rgba(255,255,255,0.53),
+    169px 271px 0 0.31px rgba(255,255,255,0.43),
+    216px 205px 0 0.39px rgba(255,255,255,0.37),
+    382px 448px 0 0.46px rgba(255,255,255,0.39),
+    253px 230px 0 0.13px rgba(255,255,255,0.26),
+    235px 225px 0 0.10px rgba(255,255,255,0.46),
+    60px 234px 0 0.13px rgba(255,255,255,0.26),
+    338px 72px 0 0.31px rgba(255,255,255,0.33),
+    497px 219px 0 0.32px rgba(255,255,255,0.47),
+    484px 248px 0 0.41px rgba(255,255,255,0.49),
+    194px 96px 0 0.14px rgba(255,255,255,0.38),
+    433px 420px 0 0.29px rgba(255,255,255,0.47),
+    100px 62px 0 0.26px rgba(255,255,255,0.35),
+    111px 254px 0 0.18px rgba(255,255,255,0.41),
+    143px 432px 0 0.17px rgba(255,255,255,0.39),
+    77px 453px 0 0.42px rgba(255,255,255,0.51),
+    100px 51px 0 0.36px rgba(255,255,255,0.41),
+    15px 95px 0 0.47px rgba(255,255,255,0.50),
+    170px 416px 0 0.29px rgba(255,255,255,0.31),
+    410px 60px 0 0.17px rgba(255,255,255,0.25),
+    399px 271px 0 0.47px rgba(255,255,255,0.49),
+    292px 433px 0 0.38px rgba(255,255,255,0.47),
+    498px 158px 0 0.18px rgba(255,255,255,0.32),
+    59px 62px 0 0.40px rgba(255,255,255,0.27),
+    488px 161px 0 0.12px rgba(255,255,255,0.40),
+    190px 70px 0 0.34px rgba(255,255,255,0.45),
+    240px 413px 0 0.15px rgba(255,255,255,0.52),
+    252px 40px 0 0.35px rgba(255,255,255,0.38),
+    323px 267px 0 0.18px rgba(255,255,255,0.46),
+    244px 271px 0 0.26px rgba(255,255,255,0.45),
+    307px 468px 0 0.23px rgba(255,255,255,0.48),
+    74px 9px 0 0.28px rgba(255,255,255,0.55),
+    102px 75px 0 0.32px rgba(255,255,255,0.40),
+    135px 357px 0 0.45px rgba(255,255,255,0.51),
+    378px 291px 0 0.16px rgba(255,255,255,0.50),
+    309px 8px 0 0.37px rgba(255,255,255,0.42),
+    106px 137px 0 0.21px rgba(255,255,255,0.52),
+    159px 278px 0 0.21px rgba(255,255,255,0.31),
+    351px 208px 0 0.37px rgba(255,255,255,0.51),
+    500px 257px 0 0.46px rgba(255,255,255,0.50),
+    94px 433px 0 0.43px rgba(255,255,255,0.26),
+    341px 133px 0 0.35px rgba(255,255,255,0.33),
+    452px 437px 0 0.32px rgba(255,255,255,0.28),
+    152px 36px 0 0.43px rgba(255,255,255,0.42),
+    151px 440px 0 0.15px rgba(255,255,255,0.34),
+    40px 366px 0 0.18px rgba(255,255,255,0.32);
+  }
+
+  #icon .emblem {
+    position: absolute;
+    top: 78px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 220px;
+    height: 220px;
+  }
+
+  #icon .emblem-spark.s1 { width: 8px; height: 8px; top: -6px; right: 6px; }
+  #icon .emblem-spark.s2 { width: 5px; height: 5px; bottom: 18px; left: -4px; }
+
+  #icon .wordmark {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 58px;
+    text-align: center;
+    font-weight: 800;
+    font-stretch: condensed;
+    font-family: 'Arial Narrow', 'Segoe UI Semibold', 'Segoe UI', 'Kanit', sans-serif;
+    font-size: 46px;
+    letter-spacing: 5px;
+    color: #ffffff;
+    text-shadow:
+      0 0 12px rgba(77,227,255,0.9),
+      0 0 30px rgba(77,227,255,0.5),
+      0 2px 5px rgba(0,0,0,0.6);
+  }
+
+  /* ─── #banner — 1200×500 banner ──────────────────────────────────────── */
+
+  #banner {
+    position: relative;
+    width: 1200px;
+    height: 500px;
+    overflow: hidden;
+    border-radius: 24px;
+    background:
+      radial-gradient(circle at 20% 34%, rgba(77,227,255,0.30) 0%, rgba(77,227,255,0) 50%),
+      linear-gradient(135deg, var(--navy-deep) 0%, var(--indigo) 100%);
+    box-shadow:
+      0 24px 64px rgba(0,0,0,0.55),
+      inset 0 0 0 2px rgba(255,255,255,0.07);
+  }
+
+  #banner .star-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 1px;
+    height: 1px;
+    border-radius: 50%;
+    background: transparent;
+  }
+
+  #banner .star-bright {
+    box-shadow:
+    210px 181px 0 0.77px rgba(255,255,255,0.96),
+    832px 79px 0 0.86px rgba(255,255,255,0.73),
+    332px 90px 0 0.83px rgba(255,255,255,0.66),
+    680px 210px 0 0.78px rgba(255,255,255,0.95),
+    508px 136px 0 0.40px rgba(255,255,255,0.90),
+    783px 19px 0 0.82px rgba(255,255,255,0.73),
+    942px 179px 0 0.48px rgba(255,255,255,0.93),
+    466px 114px 0 0.31px rgba(255,255,255,0.72),
+    672px 142px 0 0.82px rgba(255,255,255,0.99),
+    571px 179px 0 0.68px rgba(255,255,255,0.79),
+    1098px 169px 0 0.86px rgba(255,255,255,0.69),
+    534px 91px 0 0.65px rgba(255,255,255,0.99),
+    78px 55px 0 0.66px rgba(255,255,255,0.77),
+    642px 223px 0 0.66px rgba(255,255,255,0.83),
+    788px 97px 0 0.45px rgba(255,255,255,0.90),
+    3px 100px 0 0.52px rgba(255,255,255,0.67),
+    676px 160px 0 0.70px rgba(255,255,255,0.69),
+    615px 259px 0 0.49px rgba(255,255,255,0.79),
+    824px 151px 0 0.63px rgba(255,255,255,0.72),
+    776px 89px 0 0.67px rgba(255,255,255,0.76),
+    1122px 0px 0 0.48px rgba(255,255,255,0.72),
+    1187px 164px 0 0.58px rgba(255,255,255,0.80),
+    437px 242px 0 0.78px rgba(255,255,255,0.99),
+    347px 43px 0 0.47px rgba(255,255,255,0.88),
+    686px 47px 0 0.79px rgba(255,255,255,0.91),
+    635px 115px 0 0.78px rgba(255,255,255,0.70),
+    94px 125px 0 0.89px rgba(255,255,255,0.86),
+    149px 233px 0 0.55px rgba(255,255,255,0.87),
+    398px 196px 0 0.60px rgba(255,255,255,0.74),
+    11px 54px 0 0.77px rgba(255,255,255,0.73),
+    1060px 237px 0 0.33px rgba(255,255,255,0.74),
+    248px 233px 0 0.38px rgba(255,255,255,0.81),
+    1087px 162px 0 0.87px rgba(255,255,255,0.96),
+    1033px 218px 0 0.80px rgba(255,255,255,0.84),
+    325px 243px 0 0.57px rgba(255,255,255,0.91),
+    567px 248px 0 0.68px rgba(255,255,255,0.75),
+    158px 146px 0 0.44px rgba(255,255,255,0.77),
+    1106px 41px 0 0.38px rgba(255,255,255,0.73),
+    312px 109px 0 0.34px rgba(255,255,255,0.79),
+    1111px 238px 0 0.55px rgba(255,255,255,0.72);
+  }
+
+  #banner .star-faint {
+    box-shadow:
+    860px 199px 0 0.46px rgba(255,255,255,0.38),
+    40px 194px 0 0.29px rgba(255,255,255,0.48),
+    611px 199px 0 0.44px rgba(255,255,255,0.49),
+    858px 112px 0 0.30px rgba(255,255,255,0.28),
+    994px 14px 0 0.26px rgba(255,255,255,0.40),
+    828px 84px 0 0.44px rgba(255,255,255,0.48),
+    1093px 13px 0 0.46px rgba(255,255,255,0.38),
+    55px 42px 0 0.36px rgba(255,255,255,0.24),
+    945px 93px 0 0.12px rgba(255,255,255,0.31),
+    433px 232px 0 0.23px rgba(255,255,255,0.43),
+    776px 142px 0 0.40px rgba(255,255,255,0.45),
+    516px 41px 0 0.29px rgba(255,255,255,0.42),
+    106px 179px 0 0.19px rgba(255,255,255,0.22),
+    82px 15px 0 0.48px rgba(255,255,255,0.26),
+    41px 78px 0 0.20px rgba(255,255,255,0.34),
+    234px 111px 0 0.29px rgba(255,255,255,0.28),
+    755px 85px 0 0.34px rgba(255,255,255,0.49),
+    234px 83px 0 0.49px rgba(255,255,255,0.23),
+    52px 159px 0 0.33px rgba(255,255,255,0.47),
+    768px 203px 0 0.48px rgba(255,255,255,0.26),
+    497px 52px 0 0.38px rgba(255,255,255,0.29),
+    247px 21px 0 0.24px rgba(255,255,255,0.33),
+    758px 35px 0 0.30px rgba(255,255,255,0.30),
+    860px 250px 0 0.14px rgba(255,255,255,0.49),
+    941px 78px 0 0.27px rgba(255,255,255,0.42),
+    553px 247px 0 0.29px rgba(255,255,255,0.45),
+    549px 165px 0 0.44px rgba(255,255,255,0.45),
+    177px 142px 0 0.45px rgba(255,255,255,0.27),
+    951px 194px 0 0.23px rgba(255,255,255,0.35),
+    665px 93px 0 0.30px rgba(255,255,255,0.31),
+    529px 174px 0 0.21px rgba(255,255,255,0.38),
+    565px 5px 0 0.31px rgba(255,255,255,0.26),
+    494px 208px 0 0.30px rgba(255,255,255,0.43),
+    975px 251px 0 0.28px rgba(255,255,255,0.21),
+    602px 113px 0 0.26px rgba(255,255,255,0.27),
+    1191px 188px 0 0.29px rgba(255,255,255,0.36),
+    871px 169px 0 0.24px rgba(255,255,255,0.34),
+    627px 128px 0 0.19px rgba(255,255,255,0.42),
+    646px 61px 0 0.40px rgba(255,255,255,0.49),
+    379px 98px 0 0.19px rgba(255,255,255,0.35),
+    1074px 144px 0 0.49px rgba(255,255,255,0.45),
+    606px 116px 0 0.24px rgba(255,255,255,0.29),
+    1093px 64px 0 0.21px rgba(255,255,255,0.49),
+    1133px 149px 0 0.38px rgba(255,255,255,0.24),
+    1005px 52px 0 0.45px rgba(255,255,255,0.37),
+    961px 245px 0 0.28px rgba(255,255,255,0.26),
+    105px 129px 0 0.48px rgba(255,255,255,0.34),
+    133px 205px 0 0.30px rgba(255,255,255,0.37),
+    109px 77px 0 0.16px rgba(255,255,255,0.37),
+    622px 43px 0 0.50px rgba(255,255,255,0.24),
+    852px 115px 0 0.41px rgba(255,255,255,0.31),
+    906px 152px 0 0.44px rgba(255,255,255,0.50),
+    625px 30px 0 0.34px rgba(255,255,255,0.42),
+    425px 108px 0 0.21px rgba(255,255,255,0.22),
+    491px 88px 0 0.32px rgba(255,255,255,0.25),
+    836px 230px 0 0.38px rgba(255,255,255,0.34),
+    66px 118px 0 0.22px rgba(255,255,255,0.28),
+    929px 36px 0 0.37px rgba(255,255,255,0.48),
+    405px 217px 0 0.15px rgba(255,255,255,0.27),
+    305px 136px 0 0.43px rgba(255,255,255,0.22),
+    339px 157px 0 0.34px rgba(255,255,255,0.45),
+    591px 224px 0 0.15px rgba(255,255,255,0.41),
+    824px 139px 0 0.30px rgba(255,255,255,0.35),
+    164px 20px 0 0.46px rgba(255,255,255,0.42),
+    512px 13px 0 0.14px rgba(255,255,255,0.49),
+    1178px 10px 0 0.50px rgba(255,255,255,0.40),
+    551px 20px 0 0.41px rgba(255,255,255,0.25),
+    1062px 226px 0 0.47px rgba(255,255,255,0.25),
+    1198px 223px 0 0.35px rgba(255,255,255,0.35),
+    186px 240px 0 0.24px rgba(255,255,255,0.30),
+    214px 82px 0 0.23px rgba(255,255,255,0.41),
+    590px 205px 0 0.43px rgba(255,255,255,0.37),
+    931px 45px 0 0.23px rgba(255,255,255,0.30),
+    827px 0px 0 0.36px rgba(255,255,255,0.36),
+    846px 27px 0 0.18px rgba(255,255,255,0.31),
+    1020px 226px 0 0.40px rgba(255,255,255,0.26),
+    1124px 67px 0 0.47px rgba(255,255,255,0.33),
+    992px 62px 0 0.11px rgba(255,255,255,0.39),
+    490px 81px 0 0.22px rgba(255,255,255,0.20),
+    835px 47px 0 0.19px rgba(255,255,255,0.45);
+  }
+
+  #banner .emblem {
+    position: absolute;
+    top: 50%;
+    left: 90px;
+    transform: translateY(-50%);
+    width: 220px;
+    height: 220px;
+  }
+
+  #banner .emblem-spark.s1 { width: 8px; height: 8px; top: -4px; right: 8px; }
+  #banner .emblem-spark.s2 { width: 5px; height: 5px; bottom: 14px; left: -6px; }
+
+  #banner .wordmark {
+    position: absolute;
+    left: 370px;
+    top: 158px;
+    font-weight: 800;
+    font-stretch: condensed;
+    font-family: 'Arial Narrow', 'Segoe UI Semibold', 'Segoe UI', 'Kanit', sans-serif;
+    font-size: 76px;
+    line-height: 1;
+    letter-spacing: 6px;
+    color: #ffffff;
+    text-shadow:
+      0 0 14px rgba(77,227,255,0.9),
+      0 0 34px rgba(77,227,255,0.5),
+      0 3px 6px rgba(0,0,0,0.6);
+  }
+
+  #banner .tagline {
+    position: absolute;
+    left: 374px;
+    top: 250px;
+    font-weight: 700;
+    font-size: 20px;
+    letter-spacing: 8px;
+    text-transform: uppercase;
+    color: var(--gold);
+    text-shadow: 0 0 10px rgba(255,209,85,0.55);
+  }
+
+  #banner .tagline-rule {
+    position: absolute;
+    left: 374px;
+    top: 232px;
+    width: 64px;
+    height: 3px;
+    background: linear-gradient(90deg, var(--cyan), rgba(77,227,255,0));
+    border-radius: 2px;
+  }
+
+  /* meteor streak, top-right */
+  #banner .meteor {
+    position: absolute;
+    top: 46px;
+    left: 760px;
+    width: 320px;
+    height: 3px;
+    transform: rotate(18deg);
+    background: linear-gradient(90deg, rgba(77,227,255,0) 0%, rgba(77,227,255,0.55) 55%, rgba(255,255,255,0.95) 100%);
+    border-radius: 2px;
+  }
+
+  #banner .meteor-head {
+    position: absolute;
+    top: 88px;
+    left: 1064px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #ffffff;
+    box-shadow:
+      0 0 10px 4px rgba(255,255,255,0.9),
+      0 0 26px 10px rgba(77,227,255,0.75);
+  }
+
+  /* lane lines, bottom, converging toward a vanishing point at the bottom */
+  #banner .lanes {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 1200px;
+    height: 210px;
+    opacity: 0.85;
+  }
+
+  #banner::after {
+    /* soft floor fade so the lane lines sit inside atmosphere, not on bare gradient */
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 210px;
+    background: linear-gradient(180deg, rgba(11,16,38,0) 0%, rgba(11,16,38,0.55) 100%);
+    pointer-events: none;
+  }
+
+  .emblem-badge { position: relative; width: 220px; height: 220px; }
+</style>
+</head>
+<body>
+
+  <div class="stage">
+    <div class="stage-label">#icon &middot; 512 &times; 512</div>
+    <div id="icon">
+      <div class="star-layer star-faint"></div>
+      <div class="star-layer star-bright"></div>
+
+      <div class="emblem emblem-badge">
+        <div class="emblem-glow"></div>
+        <div class="emblem-ring"></div>
+        <div class="emblem-dome">
+          <div class="emblem-visor"></div>
+        </div>
+        <div class="emblem-spark s1"></div>
+        <div class="emblem-spark s2"></div>
+      </div>
+
+      <div class="wordmark">ASTRO STANCE</div>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="stage-label">#banner &middot; 1200 &times; 500</div>
+    <div id="banner">
+      <div class="star-layer star-faint"></div>
+      <div class="star-layer star-bright"></div>
+
+      <div class="meteor"></div>
+      <div class="meteor-head"></div>
+
+      <svg class="lanes" viewBox="0 0 1200 210" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="laneFade" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#4DE3FF" stop-opacity="0.06" />
+            <stop offset="100%" stop-color="#4DE3FF" stop-opacity="0.55" />
+          </linearGradient>
+        </defs>
+        <line x1="260" y1="0" x2="600" y2="210" stroke="url(#laneFade)" stroke-width="3" />
+        <line x1="600" y1="0" x2="600" y2="210" stroke="url(#laneFade)" stroke-width="3" />
+        <line x1="940" y1="0" x2="600" y2="210" stroke="url(#laneFade)" stroke-width="3" />
+      </svg>
+
+      <div class="emblem emblem-badge">
+        <div class="emblem-glow"></div>
+        <div class="emblem-ring"></div>
+        <div class="emblem-dome">
+          <div class="emblem-visor"></div>
+        </div>
+        <div class="emblem-spark s1"></div>
+        <div class="emblem-spark s2"></div>
+      </div>
+
+      <div class="tagline-rule"></div>
+      <div class="wordmark">ASTRO STANCE</div>
+      <div class="tagline">Space Treasure Mission</div>
+    </div>
+  </div>
+
+</body>
+</html>

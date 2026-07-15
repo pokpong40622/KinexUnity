@@ -95,10 +95,20 @@ namespace Kinex.Motion
         /// play with a second sit-still calibration. Additive only; does not change any existing
         /// call path.
         /// </summary>
-        public void EstimateSeatedFromStanding()
+        public void EstimateSeatedFromStanding() => EstimateSeatedFromStanding(StandingOffsetFactor);
+
+        /// <summary>
+        /// Same as <see cref="EstimateSeatedFromStanding()"/> with a caller-chosen hip-drop
+        /// factor (in torso lengths). Real chair sits measured off tablet footage drop only
+        /// ~0.37 torso — and the apparent torso also shrinks while seated, which the
+        /// distance-normalization in Tick amplifies — so games that must reliably see
+        /// JustSat from an estimated baseline (AstroStance) pass a shallower factor
+        /// (~0.30) and let the adaptive range learn the player's true depth.
+        /// </summary>
+        public void EstimateSeatedFromStanding(float offsetFactor)
         {
-            _seatedHipY = _standingHipY + StandingOffsetFactor * _torso0;
-            _seatedShY = _standingShY + StandingOffsetFactor * _torso0;
+            _seatedHipY = _standingHipY + offsetFactor * _torso0;
+            _seatedShY = _standingShY + offsetFactor * _torso0;
             _hasSeated = true;
         }
 
