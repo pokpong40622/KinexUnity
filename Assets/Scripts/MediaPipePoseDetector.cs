@@ -43,6 +43,28 @@ public class MediaPipePoseDetector : MonoBehaviour
              "resting legs but slightly more lag on leg moves. This is what stops the still leg " +
              "jittering when the other leg lifts.")]
     [SerializeField][Range(0.05f, 0.5f)] float legSmoothing = 0.13f;
+    [Tooltip("Use the 1€ filter (speed-adaptive smoothing — what MediaPipe itself ships) instead of " +
+             "the plain EMA above for ALL landmark channels: steadier while holding still AND less lag " +
+             "on fast moves. Opt-in per scene (Motion Lab turns it on); other games keep the proven EMA.")]
+    [SerializeField] bool useOneEuroSmoothing = false;
+    [Tooltip("1€ min cutoff (Hz). Lower = steadier at rest but laggier. MediaPipe ships 0.1 for world " +
+             "landmarks; 0.05 biases toward stillness for slow rehab movement.")]
+    [SerializeField][Range(0.01f, 1f)] float oneEuroMinCutoff = 0.05f;
+    [Tooltip("1€ speed coefficient. Higher = snappier during fast motion. MediaPipe ships 40 (world).")]
+    [SerializeField][Range(0f, 100f)] float oneEuroBeta = 20f;
+
+    public bool UseOneEuroSmoothing => useOneEuroSmoothing;
+
+    // One 1€ filter per channel: 33 image-space + 33 world landmarks × xyz, 17 COCO × xy.
+    // Lazily created on first use so scenes with the flag off pay nothing.
+    Kinex.Motion.OneEuroFilter[] _euro33, _euroWorld33, _euro2D;
+
+    float EuroFilter(ref Kinex.Motion.OneEuroFilter[] bank, int size, int channel, float value, float dt)
+    {
+        bank ??= new Kinex.Motion.OneEuroFilter[size];
+        var f = bank[channel] ??= new Kinex.Motion.OneEuroFilter(oneEuroMinCutoff, oneEuroBeta);
+        return f.Filter(value, dt);
+    }
     [Tooltip("Drive the avatar from keypoints. Off = only supply keypoints for scoring.")]
     [SerializeField] bool drivesAvatar = true;
     [Tooltip("A bone only drives while BOTH its endpoints are at least this visible. " +
@@ -528,7 +550,15 @@ public class MediaPipePoseDetector : MonoBehaviour
             _visibility[i] = vis;
 
             var cur = new NormLandmark { x = l.x, y = l.y, z = l.z, visibility = vis };
-            if (_landmarks33Init)
+            if (useOneEuroSmoothing)
+            {
+                float fdt = Time.deltaTime;
+                _landmarks33[i].x = EuroFilter(ref _euro33, 33 * 3, i * 3 + 0, cur.x, fdt);
+                _landmarks33[i].y = EuroFilter(ref _euro33, 33 * 3, i * 3 + 1, cur.y, fdt);
+                _landmarks33[i].z = EuroFilter(ref _euro33, 33 * 3, i * 3 + 2, cur.z, fdt);
+                _landmarks33[i].visibility = vis;
+            }
+            else if (_landmarks33Init)
             {
                 // Legs (knees/ankles) are the noisiest landmarks — smooth them harder so the
                 // puppet's legs stop flying around on jittery frames.
@@ -556,7 +586,15 @@ public class MediaPipePoseDetector : MonoBehaviour
             {
                 var l = w[i];
                 float vis = _visibility[i]; // reuse this joint's normalized-landmark visibility
-                if (_world33Init)
+                if (useOneEuroSmoothing)
+                {
+                    float fdt = Time.deltaTime;
+                    _world33[i].x = EuroFilter(ref _euroWorld33, 33 * 3, i * 3 + 0, l.x, fdt);
+                    _world33[i].y = EuroFilter(ref _euroWorld33, 33 * 3, i * 3 + 1, l.y, fdt);
+                    _world33[i].z = EuroFilter(ref _euroWorld33, 33 * 3, i * 3 + 2, l.z, fdt);
+                    _world33[i].visibility = vis;
+                }
+                else if (_world33Init)
                 {
                     bool isLeg = i == 25 || i == 26 || i == 27 || i == 28;
                     float s = isLeg ? legSmoothing : smoothingFactor;
@@ -727,11 +765,20 @@ public class MediaPipePoseDetector : MonoBehaviour
             LatestConfidence[coco] = lm.visibility ?? 1f;
         }
 
-        // LERP-smooth each seen joint to take the jitter out of the avatar + overlay.
+        // Smooth each seen joint to take the jitter out of the avatar + overlay (1€ when enabled,
+        // else the legacy LERP EMA).
         for (int i = 0; i < 17; i++)
         {
             if (!seen[i]) { LatestKeypoints[i] = _smoothed2D[i]; continue; }
-            if (!_has2D[i]) { _smoothed2D[i] = raw[i]; _has2D[i] = true; }
+            if (useOneEuroSmoothing)
+            {
+                float fdt = Time.deltaTime;
+                _smoothed2D[i] = new Vector2(
+                    EuroFilter(ref _euro2D, 17 * 2, i * 2 + 0, raw[i].x, fdt),
+                    EuroFilter(ref _euro2D, 17 * 2, i * 2 + 1, raw[i].y, fdt));
+                _has2D[i] = true;
+            }
+            else if (!_has2D[i]) { _smoothed2D[i] = raw[i]; _has2D[i] = true; }
             else _smoothed2D[i] = Vector2.Lerp(_smoothed2D[i], raw[i], smoothingFactor);
             LatestKeypoints[i] = _smoothed2D[i];
         }

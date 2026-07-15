@@ -296,7 +296,9 @@ namespace Kinex.MirrorGame.EditorTools
         static void TestBuildSettings()
         {
             var scenes = EditorBuildSettings.scenes;
-            Check(scenes.Length == 8, "BuildSettings: 8 scenes", $"got {scenes.Length}");
+            // At least the 8 scenes that existed when Mirror shipped (later games append more);
+            // an exact count here broke every time a new game landed.
+            Check(scenes.Length >= 8, "BuildSettings: >= 8 scenes", $"got {scenes.Length}");
             bool hasMirror = false;
             foreach (var s in scenes) if (s.path == ScenePath) hasMirror = true;
             Check(hasMirror, "BuildSettings: MirrorGameScene registered");

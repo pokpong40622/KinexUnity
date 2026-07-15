@@ -50,6 +50,9 @@ namespace Kinex.App
                 case "dancestar":
                     SceneManager.LoadScene("DanceStarScene");
                     break;
+                case "motionlab":
+                    SceneManager.LoadScene("MotionLabScene");
+                    break;
                 default:
                     Debug.LogWarning($"[SceneRouter] Unknown game id: '{gameId}'");
                     break;

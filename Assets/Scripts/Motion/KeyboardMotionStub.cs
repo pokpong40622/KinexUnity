@@ -9,7 +9,8 @@ namespace Kinex.Motion
     /// (mirrors how MegaDanceManager's useKeyboardStub flag works today).
     ///
     /// S = toggle stand/sit, Left/Right arrows = lane while held, K/J = left/right knee raise
-    /// pulse, T held = tiptoe, N/M = left/right kick pulse, B held = single-leg hold.
+    /// pulse, T held = tiptoe, N/M = left/right kick pulse, B held = single-leg hold,
+    /// H/G = back-kick pulse, V held = tandem stand, F/D = front-kick pulse, Y/U held = head turn.
     /// </summary>
     public class KeyboardMotionStub
     {
@@ -52,6 +53,15 @@ namespace Kinex.Motion
         public bool JustKickedBackRight { get; private set; }
         bool _hPrevDown, _gPrevDown;
 
+        // --- Motion Lab additions (F/D = front-kick pulses, Y/U = head turned left/right while held) ---
+        public bool JustKickedFrontLeft { get; private set; }
+        public bool JustKickedFrontRight { get; private set; }
+        bool _fPrevDown, _dPrevDown;
+
+        /// <summary>-1 = head turned left (Y held), +1 = right (U held), 0 = facing camera.</summary>
+        public int HeadFacing { get; private set; }
+        public bool IsFullBodyVisible => true;
+
         public bool IsTandemHolding { get; private set; }
         public float TandemHoldSeconds { get; private set; }
 
@@ -66,6 +76,8 @@ namespace Kinex.Motion
             JustKickedRight = false;
             JustKickedBackLeft = false;
             JustKickedBackRight = false;
+            JustKickedFrontLeft = false;
+            JustKickedFrontRight = false;
 
             var kb = Keyboard.current;
             if (kb == null) return;
@@ -133,6 +145,18 @@ namespace Kinex.Motion
             bool vDown = kb.vKey.isPressed;
             IsTandemHolding = vDown;
             TandemHoldSeconds = vDown ? TandemHoldSeconds + dt : 0f;
+
+            // Front-kick pulses (Motion Lab).
+            bool fDown = kb.fKey.isPressed;
+            if (fDown && !_fPrevDown) JustKickedFrontLeft = true;
+            _fPrevDown = fDown;
+
+            bool dDown = kb.dKey.isPressed;
+            if (dDown && !_dPrevDown) JustKickedFrontRight = true;
+            _dPrevDown = dDown;
+
+            // Head facing, while held (Motion Lab).
+            HeadFacing = kb.yKey.isPressed ? -1 : (kb.uKey.isPressed ? 1 : 0);
         }
 
         void CountKnee(bool isLeft)
