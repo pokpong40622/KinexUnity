@@ -27,12 +27,8 @@ namespace Kinex.AstroStance.EditorTools
                 Run("AstroFeed", AstroFeedReplayTest.Run);
                 Run("Motion", Kinex.Motion.EditorTools.MotionSelfTest.Run);
                 Run("MotionLab", Kinex.MotionLabEditor.MotionLabSelfTest.Run);
-                Run("Mirror", Kinex.MirrorGame.EditorTools.MirrorGameSelfTest.Run);
                 Run("TempleHunt", Kinex.TempleHunt.EditorTools.TempleHuntSelfTest.Run);
                 Run("DanceStar", Kinex.DanceStar.DanceStarSelfTest.Run);
-                Run("FruitGame", Kinex.FruitGame.EditorTools.FruitGameSelfTest.Run);
-                Run("BalanceQuest", Kinex.BalanceQuest.EditorTools.BalanceQuestSelfTest.Run);
-                Run("BattleGame", Kinex.BattleGame.EditorTools.BattleGameSelfTest.Run);
             }
             finally
             {

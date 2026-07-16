@@ -32,18 +32,6 @@ namespace Kinex.App
                 case "world":
                     SceneManager.LoadScene("KinexWorldScene");
                     break;
-                case "fruitgame":
-                    SceneManager.LoadScene("FruitGameScene");
-                    break;
-                case "balancequest":
-                    SceneManager.LoadScene("BalanceQuestScene");
-                    break;
-                case "battlegame":
-                    SceneManager.LoadScene("BattleGameScene");
-                    break;
-                case "mirrorgame":
-                    SceneManager.LoadScene("MirrorGameScene");
-                    break;
                 case "templehunt":
                     SceneManager.LoadScene("TempleHuntScene");
                     break;

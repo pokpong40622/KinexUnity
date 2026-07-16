@@ -9,7 +9,6 @@ using Kinex.Motion;
 using Kinex.UI;            // GameHud corner rings (HR mock + live match), shared with all games
 using Kinex.MegaDance;     // VoiceCoach, PoseScorer
 using Kinex.Trainer;       // TrainerPoseData, TrainerPoseController
-using Kinex.BalanceQuest;  // ArmPoseSignatures (reused for the single-leg arm-variant checks)
 using Kinex.TempleHunt;    // TempleLogic.ArmsOutOk (reused for the warm-up T-arms hold)
 
 namespace Kinex.DanceStar

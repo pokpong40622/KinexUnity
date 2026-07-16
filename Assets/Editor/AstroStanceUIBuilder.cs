@@ -162,17 +162,17 @@ namespace Kinex.AstroStance.EditorTools
             // compile), so each button below wires to one of the selector's plain void SelectX()
             // methods instead, via the same AddPersistentListener pattern as every other button here.
             var diffLabel = AddText(intro.transform, "เลือกระดับความยาก", thaiSemi, 32, DarkText, TextAlignmentOptions.Center);
-            Place(diffLabel.rectTransform, 64, 752, 799, 40);
+            Place(diffLabel.rectTransform, 64, 852, 799, 40);
             Outline(diffLabel, Color.white, 0.3f);
 
-            const float diffW = 220f, diffH = 88f, diffGap = 24f;
+            const float diffW = 220f, diffH = 88f, diffGap = 24f, diffY = 896f;
             float diffMarginX = (FW - (3 * diffW + 2 * diffGap)) * 0.5f;
             var easyBtn = AddPillButton(intro.transform, "DifficultyEasyButton", "ง่าย", thaiSemi, Cyan, Color.white,
-                diffMarginX, 798, diffW, diffH, 38);
+                diffMarginX, diffY, diffW, diffH, 38);
             var normalBtn = AddPillButton(intro.transform, "DifficultyNormalButton", "ปกติ", thaiSemi, Cyan, Color.white,
-                diffMarginX + (diffW + diffGap), 798, diffW, diffH, 38);
+                diffMarginX + (diffW + diffGap), diffY, diffW, diffH, 38);
             var hardBtn = AddPillButton(intro.transform, "DifficultyHardButton", "ยาก", thaiSemi, Cyan, Color.white,
-                diffMarginX + 2 * (diffW + diffGap), 798, diffW, diffH, 38);
+                diffMarginX + 2 * (diffW + diffGap), diffY, diffW, diffH, 38);
 
             var diffSelectorGo = new GameObject("DifficultySelector", typeof(RectTransform));
             diffSelectorGo.transform.SetParent(intro.transform, false);
@@ -187,22 +187,13 @@ namespace Kinex.AstroStance.EditorTools
             UnityEditor.Events.UnityEventTools.AddPersistentListener(normalBtn.onClick, diffSelector.SelectNormal);
             UnityEditor.Events.UnityEventTools.AddPersistentListener(hardBtn.onClick, diffSelector.SelectHard);
 
-            // Start button: startbutton.png bakes in its own "เริ่มภารกิจ" label, so (unlike
-            // AddPillButton) no separate TMP text child is added on top of it. Falls back to the
-            // original procedural pill + text if the art isn't built yet.
-            var startSprite = Ui("startbutton");
-            Button startBtn;
-            if (startSprite != null)
-            {
-                var startImg = AddImage(intro.transform, "StartButton", startSprite, Color.white);
-                startImg.raycastTarget = true;
-                Place(startImg.rectTransform, 214, 1200, 500, 130);
-                startBtn = startImg.gameObject.AddComponent<Button>();
-            }
-            else
-            {
-                startBtn = AddPillButton(intro.transform, "StartButton", "เริ่มภารกิจ", thaiSemi, Cyan, Color.white, 213, 1250, 500, 120, 56);
-            }
+            // Start button: baked "เริ่มภารกิจ" PNG (solid glossy green pill, label + shadow baked in,
+            // correct Thai). Sized to its own aspect + centred. The old startbutton.png had huge
+            // transparent margins so it rendered small/washed — btn_start is trimmed + opaque.
+            const float startH = 150f;
+            float startW = BakedWidth("btn_start", startH);
+            var startBtn = AddBakedButton(intro.transform, "StartButton", "btn_start",
+                (FW - startW) * 0.5f, 1205f, startW, startH, "เริ่มภารกิจ", thaiSemi, Green);
             UnityEditor.Events.UnityEventTools.AddPersistentListener(startBtn.onClick, director.OnStartPressed);
 
             // =================== FRAMING ===================
@@ -291,14 +282,16 @@ namespace Kinex.AstroStance.EditorTools
             // Sized to the ~240x110 HUD slot per spec (a mild stretch off the source aspect — an
             // acceptable trade to keep the score's on-screen position/footprint unchanged). Falls
             // back to the original procedural chip + tinted knob star if the art isn't built yet.
+            // HUD in-play elements run ~15% larger than the reference slots (user request) so they
+            // read clearly at arm's length during play.
             var scoreBadgeSprite = Ui("scorebadge");
             TMP_Text scoreText;
             if (scoreBadgeSprite != null)
             {
                 var scoreBadge = AddImage(hud.transform, "ScoreBadge", scoreBadgeSprite, Color.white);
-                Place(scoreBadge.rectTransform, 36, 36, 240, 110);
-                scoreText = AddText(hud.transform, "0", montserratBlack, 58, OffWhite, TextAlignmentOptions.Left);
-                Place(scoreText.rectTransform, 132, 46, 130, 82);
+                Place(scoreBadge.rectTransform, 36, 36, 276, 127);
+                scoreText = AddText(hud.transform, "0", montserratBlack, 66, OffWhite, TextAlignmentOptions.Left);
+                Place(scoreText.rectTransform, 146, 52, 150, 92);
             }
             else
             {
@@ -313,11 +306,17 @@ namespace Kinex.AstroStance.EditorTools
             // centered inside — matches the timeuireference.png reference. Same ring_track/
             // ring_fill sprites as CalibRing/FramingHoldRing, just sized+placed to read as a
             // tidy stopwatch instead of the old chip-backed square.
-            const float timerRingSize = 132f;
-            const float timerColCenterX = 463f; // center of the old 343..583 chip span
-            const float timerColCenterY = 91f;  // center of the old 36..146 chip span
+            const float timerRingSize = 212f; // bigger, more prominent stopwatch (+15%)
+            const float timerColCenterX = 463f;
+            const float timerColCenterY = 128f;
             float timerRingX = timerColCenterX - timerRingSize * 0.5f;
             float timerRingY = timerColCenterY - timerRingSize * 0.5f;
+            // Cream backing disc behind the ring so the mm:ss reads clearly over the bright park.
+            var timerDiscSprite = Ui("dot_on");
+            float timerDiscSize = timerRingSize * 0.80f;
+            var timerDisc = AddImage(hud.transform, "TimerDisc",
+                timerDiscSprite != null ? timerDiscSprite : knob, new Color(0.96f, 0.98f, 0.90f, 0.96f));
+            Place(timerDisc.rectTransform, timerColCenterX - timerDiscSize * 0.5f, timerColCenterY - timerDiscSize * 0.5f, timerDiscSize, timerDiscSize);
             var timerRingTrack = AddImage(hud.transform, "TimerRingTrack",
                 ringTrackSprite != null ? ringTrackSprite : knob, ringTrackSprite != null ? Color.white : RingTrack);
             Place(timerRingTrack.rectTransform, timerRingX, timerRingY, timerRingSize, timerRingSize);
@@ -329,21 +328,20 @@ namespace Kinex.AstroStance.EditorTools
             timerRing.fillClockwise = false; // counts DOWN
             timerRing.fillAmount = 1f;
             Place(timerRing.rectTransform, timerRingX, timerRingY, timerRingSize, timerRingSize);
-            var timerText = AddText(hud.transform, "3:00", thaiSemi, 38, OffWhite, TextAlignmentOptions.Center);
-            Place(timerText.rectTransform, timerRingX, timerColCenterY - 30f, timerRingSize, 60f);
-            Outline(timerText, new Color(0f, 0f, 0f, 0.6f), 0.2f);
+            var timerText = AddText(hud.transform, "3:00", montserratBlack, 62, DarkText, TextAlignmentOptions.Center);
+            Place(timerText.rectTransform, timerRingX, timerColCenterY - 40f, timerRingSize, 80f);
 
             // -- Score-change popup: floats just under the score badge. Hidden by default — the
             // director activates + animates it (ShowScorePop) whenever the score changes. Plain
             // (non-sliced) scorechange.png bakes its own gold star top-center (source 488x511,
             // ~0.96:1); the +1/-1 number goes in the card body BELOW that baked star.
             var scoreChangeSprite = Ui("scorechange");
-            const float scPopW = 180f, scPopH = 190f;
+            const float scPopW = 207f, scPopH = 219f;
             var scoreChangePopup = AddImage(hud.transform, "ScoreChangePopup",
                 scoreChangeSprite != null ? scoreChangeSprite : knob, scoreChangeSprite != null ? Color.white : GlassBg);
             if (scoreChangeSprite == null) Round(scoreChangePopup);
-            Place(scoreChangePopup.rectTransform, 36, 160, scPopW, scPopH);
-            var scoreChangeText = AddText(scoreChangePopup.transform, "+1", montserratBlack, 58, OffWhite, TextAlignmentOptions.Center);
+            Place(scoreChangePopup.rectTransform, 36, 176, scPopW, scPopH);
+            var scoreChangeText = AddText(scoreChangePopup.transform, "+1", montserratBlack, 66, OffWhite, TextAlignmentOptions.Center);
             scoreChangeText.fontStyle = FontStyles.Bold;
             // Parent-relative stretch (NOT Place — Place's math assumes a canvas-sized parent):
             // fills the popup's lower body, below the baked star which sits in the top ~40%.
@@ -359,15 +357,38 @@ namespace Kinex.AstroStance.EditorTools
             var pauseBtnImg = AddImage(hud.transform, "PauseButton",
                 btnRoundSprite != null ? btnRoundSprite : knob, btnRoundSprite != null ? Color.white : GlassBg);
             pauseBtnImg.raycastTarget = true;
-            Place(pauseBtnImg.rectTransform, 795, 36, 96, 96);
+            Place(pauseBtnImg.rectTransform, 781, 36, 110, 110);
             var pauseBtn = pauseBtnImg.gameObject.AddComponent<Button>();
-            var pauseGlyph = AddText(pauseBtnImg.transform, "II", thaiSemi, 40, OffWhite, TextAlignmentOptions.Center);
+            var pauseGlyph = AddText(pauseBtnImg.transform, "II", thaiSemi, 46, OffWhite, TextAlignmentOptions.Center);
             Stretch(pauseGlyph.rectTransform);
             UnityEditor.Events.UnityEventTools.AddPersistentListener(pauseBtn.onClick, director.OnPausePressed);
 
+            // -- Feedback popups (pictures), centred. Shown briefly on a safe dodge (ปลอดภัย! ✓) or
+            //    a hit (ระวัง! ⚠). Baked PNGs (correct Thai); the director pops one for ~1.2s.
+            var safeSprite = Ui("pop_safe");
+            var dangerSprite = Ui("pop_danger");
+            const float fbH = 184f, fbY = 452f; // bigger picture popup (+15% and then some — it's the key feedback)
+            Image feedbackSafe = null, feedbackDanger = null;
+            if (safeSprite != null)
+            {
+                float w = fbH * safeSprite.rect.width / safeSprite.rect.height;
+                feedbackSafe = AddImage(hud.transform, "FeedbackSafe", safeSprite, Color.white);
+                feedbackSafe.raycastTarget = false;
+                Place(feedbackSafe.rectTransform, (FW - w) * 0.5f, fbY, w, fbH);
+                feedbackSafe.gameObject.SetActive(false);
+            }
+            if (dangerSprite != null)
+            {
+                float w = fbH * dangerSprite.rect.width / dangerSprite.rect.height;
+                feedbackDanger = AddImage(hud.transform, "FeedbackDanger", dangerSprite, Color.white);
+                feedbackDanger.raycastTarget = false;
+                Place(feedbackDanger.rectTransform, (FW - w) * 0.5f, fbY, w, fbH);
+                feedbackDanger.gameObject.SetActive(false);
+            }
+
             // -- Lane dots, centered bottom. --
             var laneDots = new Image[3];
-            const float dotSize = 36f, dotSpacing = 70f;
+            const float dotSize = 42f, dotSpacing = 80f;
             float dotsCenterX = FW * 0.5f;
             // Director only ever retints .color at runtime (LaneDotOn/Off) — it never swaps
             // sprites — so all 3 dots share one shape sprite (dot_on's baked rim/fill) and rely
@@ -395,10 +416,10 @@ namespace Kinex.AstroStance.EditorTools
                 toastBg.raycastTarget = false;
                 Place(toastBg.rectTransform, 64, 495, 799, 100);
             }
-            var toastText = AddText(hud.transform, "", thaiBlack, 64, Gold, TextAlignmentOptions.Center);
+            var toastText = AddText(hud.transform, "", thaiBlack, 74, Gold, TextAlignmentOptions.Center);
             toastText.fontStyle = FontStyles.Bold;
             toastText.raycastTarget = false;
-            Place(toastText.rectTransform, 64, 500, 799, 90);
+            Place(toastText.rectTransform, 44, 500, 839, 100);
             Outline(toastText, new Color(0f, 0f, 0f, 0.6f), 0.25f);
 
             // -- Body-loss warning popup (Contract 2), centered, hidden by default. --
@@ -428,10 +449,17 @@ namespace Kinex.AstroStance.EditorTools
             Stretch(bodyLostToastText.rectTransform);
             Outline(bodyLostToastText, new Color(0f, 0f, 0f, 0.6f), 0.25f);
 
-            // -- Countdown, huge center, initially inactive. --
-            var countdownText = AddText(hud.transform, "3", montserratBlack, 200, OffWhite, TextAlignmentOptions.Center);
+            // -- Countdown, huge center, initially inactive. The number sits on a dark badge disc so
+            //    3-2-1-ไป reads clearly over the bright park (was hard to see as bare dark ink). The
+            //    disc is a separate object the director toggles alongside the number (countdownBadge).
+            var cdDiscSprite = Ui("dot_on");
+            var countdownBadge = AddImage(hud.transform, "CountdownBadge",
+                cdDiscSprite != null ? cdDiscSprite : knob, new Color(0.12f, 0.16f, 0.10f, 0.74f));
+            Place(countdownBadge.rectTransform, 264f, 510f, 400f, 400f);
+            countdownBadge.gameObject.SetActive(false);
+            var countdownText = AddText(hud.transform, "3", montserratBlack, 200, Color.white, TextAlignmentOptions.Center);
             Place(countdownText.rectTransform, 0, 560, FW, 300);
-            Outline(countdownText, Cyan, 0.25f);
+            Outline(countdownText, new Color(0.10f, 0.35f, 0.62f, 1f), 0.3f);
             countdownText.gameObject.SetActive(false);
 
             // =================== CAMERA FEED + PREVIEW TOGGLE (canvas-level, siblings) ===================
@@ -447,10 +475,20 @@ namespace Kinex.AstroStance.EditorTools
             AddCard(pause.transform, 94, 480, 740, 400);
             var pauseTitle = AddText(pause.transform, "พักเกม", thaiBlack, 64, OffWhite, TextAlignmentOptions.Center);
             Place(pauseTitle.rectTransform, 114, 520, 700, 110);
-            var resumeBtn = AddPillButton(pause.transform, "ResumeButton", "เล่นต่อ", thaiSemi, Green, Color.white, 197, 660, 260, 110, 42);
+            // Baked-art buttons (เล่นต่อ / ออกจากเกม) sized to their own aspect + centered as a row.
+            const float pauseBtnH = 104f, pauseGap = 30f, pauseRowY = 636f;
+            float wResume = BakedWidth("btn_resume", pauseBtnH);
+            float wExit = BakedWidth("btn_exit", pauseBtnH);
+            float pauseRowX = 94f + (740f - (wResume + pauseGap + wExit)) * 0.5f;
+            var resumeBtn = AddBakedButton(pause.transform, "ResumeButton", "btn_resume", pauseRowX, pauseRowY, wResume, pauseBtnH, "เล่นต่อ", thaiSemi, Green);
             UnityEditor.Events.UnityEventTools.AddPersistentListener(resumeBtn.onClick, director.OnResumePressed);
-            var exitFromPauseBtn = AddPillButton(pause.transform, "ExitFromPauseButton", "ออกจากเกม", thaiSemi, Gray, Color.white, 470, 660, 260, 110, 42, secondary: true);
+            var exitFromPauseBtn = AddBakedButton(pause.transform, "ExitFromPauseButton", "btn_exit", pauseRowX + wResume + pauseGap, pauseRowY, wExit, pauseBtnH, "ออกจากเกม", thaiSemi, Gray, fbSecondary: true);
             UnityEditor.Events.UnityEventTools.AddPersistentListener(exitFromPauseBtn.onClick, director.OnExitPressed);
+            // Small "จบเกม" button below → ends the run straight to the results screen.
+            const float endGameH = 80f;
+            float wEndGame = BakedWidth("btn_endgame", endGameH);
+            var endGameBtn = AddBakedButton(pause.transform, "EndGameButton", "btn_endgame", 94f + (740f - wEndGame) * 0.5f, 778f, wEndGame, endGameH, "จบเกม", thaiSemi, Gold);
+            UnityEditor.Events.UnityEventTools.AddPersistentListener(endGameBtn.onClick, director.OnEndGamePressed);
 
             // =================== RESULTS ===================
             var results = NewPanel(canvas.transform, "ResultsPanel");
@@ -480,9 +518,18 @@ namespace Kinex.AstroStance.EditorTools
                 resultStars[i] = star;
             }
 
+            // Dynamic praise headline (ทำได้ดีมาก! etc.) — director sets the text from the star count.
+            var resultPraiseText = AddText(results.transform, "ทำได้ดีมาก!", thaiBlack, 52, Green, TextAlignmentOptions.Center);
+            Place(resultPraiseText.rectTransform, 94, 636, 740, 62);
+            Outline(resultPraiseText, Color.white, 0.25f);
+
             // Rows double as the icon fill AND the value-text color, so each tone is darkened
             // enough to stay readable as text on the cream results card (plain Gold/Cyan/Green
             // read fine as icon fills but wash out as text on cream).
+            // Two groups: the first 3 rows are the in-game ACTION names (treasure / kick / dodge) and
+            // get a white rounded-rect background so they read as a set, separate from the lower rows
+            // which are the rehab POSE names (sit-stand / step / side-kick). The director fills all 6
+            // values in this exact order (see EndRun's reps[]).
             (string label, Color color)[] repRows =
             {
                 ("สมบัติที่เก็บ", new Color(0.68f, 0.46f, 0.04f)),   // deep amber (was Gold)
@@ -490,28 +537,41 @@ namespace Kinex.AstroStance.EditorTools
                 ("หลบก้อนหิน", new Color(0.10f, 0.40f, 0.16f)),      // deep green (was Green)
                 ("ลุก-นั่ง", OffWhite),
                 ("ก้าวข้าง", IndigoLight),
+                ("เตะขาออกข้าง", new Color(0.10f, 0.40f, 0.45f)),    // deep teal — the side-kick pose dose
             };
-            // Icon per row, in repRows order (สมบัติ/เตะ/หลบ/ลุก-นั่ง/ก้าว) — these Images are build-time
-            // only (never touched by the director afterward), so unlike stars/dots we can safely
-            // give each row its own distinct icon sprite instead of one shared shape.
-            string[] repIconSprites = { "icon_treasure", "icon_kick", "icon_dodge", "icon_sit", "icon_step" };
-            var resultRepValues = new TMP_Text[5];
+            const int actionRowCount = 3; // first N rows are game actions → white pill background
+            // Icon per row, in repRows order — these Images are build-time only (never touched by the
+            // director afterward), so unlike stars/dots we can safely give each its own icon sprite.
+            string[] repIconSprites = { "icon_treasure", "icon_kick", "icon_dodge", "icon_sit", "icon_step", "icon_kick" };
+            var resultRepValues = new TMP_Text[repRows.Length];
+            const float rowPitch = 72f, rowTop = 724f;
             for (int i = 0; i < repRows.Length; i++)
             {
-                float ry = 700 + i * 84;
+                float ry = rowTop + i * rowPitch;
+                if (i < actionRowCount)
+                {
+                    var pill = AddImage(results.transform, $"RepPill{i}", null, new Color(1f, 1f, 1f, 0.92f));
+                    Round(pill);
+                    Place(pill.rectTransform, 96, ry - 10, 716, 64);
+                }
                 var iconSprite = Ui(repIconSprites[i]);
                 var icon = AddImage(results.transform, $"RepIcon{i}", iconSprite != null ? iconSprite : knob, iconSprite != null ? Color.white : repRows[i].color);
-                Place(icon.rectTransform, 110, ry, 44, 44);
+                Place(icon.rectTransform, 120, ry, 44, 44);
                 var label = AddText(results.transform, repRows[i].label, thaiSemi, 38, OffWhite, TextAlignmentOptions.Left);
-                Place(label.rectTransform, 170, ry - 4, 400, 52);
+                Place(label.rectTransform, 180, ry - 4, 400, 52);
                 var value = AddText(results.transform, "0", thaiSemi, 44, repRows[i].color, TextAlignmentOptions.Right);
-                Place(value.rectTransform, 610, ry - 6, 190, 56);
+                Place(value.rectTransform, 600, ry - 6, 190, 56);
                 resultRepValues[i] = value;
             }
 
-            var playAgainBtn = AddPillButton(results.transform, "PlayAgainButton", "เล่นอีกครั้ง", thaiSemi, Cyan, Color.white, 150, 1210, 300, 110, 42);
+            // Baked-art buttons (เล่นอีกครั้ง / กลับหน้าหลัก) sized to aspect + centered as a row.
+            const float resBtnH = 104f, resGap = 30f, resRowY = 1200f;
+            float wPlay = BakedWidth("btn_playagain", resBtnH);
+            float wHome = BakedWidth("btn_home", resBtnH);
+            float resRowX = 54f + (819f - (wPlay + resGap + wHome)) * 0.5f;
+            var playAgainBtn = AddBakedButton(results.transform, "PlayAgainButton", "btn_playagain", resRowX, resRowY, wPlay, resBtnH, "เล่นอีกครั้ง", thaiSemi, Cyan);
             UnityEditor.Events.UnityEventTools.AddPersistentListener(playAgainBtn.onClick, director.OnPlayAgainPressed);
-            var exitFromResultsBtn = AddPillButton(results.transform, "ExitFromResultsButton", "กลับหน้าหลัก", thaiSemi, Gray, Color.white, 480, 1210, 300, 110, 42, secondary: true);
+            var exitFromResultsBtn = AddBakedButton(results.transform, "ExitFromResultsButton", "btn_home", resRowX + wPlay + resGap, resRowY, wHome, resBtnH, "กลับหน้าหลัก", thaiSemi, Gray, fbSecondary: true);
             UnityEditor.Events.UnityEventTools.AddPersistentListener(exitFromResultsBtn.onClick, director.OnExitPressed);
 
             feedPanel.transform.SetAsLastSibling();
@@ -538,8 +598,12 @@ namespace Kinex.AstroStance.EditorTools
             Assign(so, "toastBg", toastBg);
             Assign(so, "scoreChangePopup", scoreChangePopup);
             Assign(so, "scoreChangeText", scoreChangeText);
+            Assign(so, "feedbackSafe", feedbackSafe);
+            Assign(so, "feedbackDanger", feedbackDanger);
             Assign(so, "countdownText", countdownText);
+            AssignGo(so, "countdownBadge", countdownBadge.gameObject);
             Assign(so, "resultScoreText", resultScoreText);
+            Assign(so, "resultPraiseText", resultPraiseText);
             Assign(so, "bodyLostIgnoreButton", bodyLostIgnoreBtn);
             AssignGo(so, "bodyLostToast", bodyLostToastGo);
 
@@ -578,9 +642,11 @@ namespace Kinex.AstroStance.EditorTools
         // missing, so the intro still builds without it.
         static void BuildHowToCards(Transform parent, TMP_FontAsset thaiSemi, Sprite knob)
         {
-            const float cardW = 250f, cardH = 384f;
-            float[] xs = { 40f, 339f, 638f };
-            float[] ys = { 382f, 318f, 382f }; // middle card raised for the staggered reference look
+            const float cardW = 264f, cardH = 386f; // a touch wider than the original 250
+            // Tighter, centred fan (small gaps, cards nearly touching) sitting just under the
+            // subtitle — matches the reference. Middle card dropped lower for the staggered look.
+            float[] xs = { 46f, 332f, 618f };
+            float[] ys = { 372f, 430f, 372f };
             string[] cardSprites = { "sidewalkcard", "sitcard", "kickcard" };
             string[] icons = { "icon_step", "icon_sit", "icon_kick" }; // fallback-only
             string[] captions = // fallback-only
@@ -787,6 +853,32 @@ namespace Kinex.AstroStance.EditorTools
             }
             Place(img.rectTransform, x, y, w, h);
             return img;
+        }
+
+        // Baked-art button: a pre-rendered PNG that already contains its label (correct Thai
+        // shaping, gloss + drop shadow baked in) — no TMP text child on top. Sized to (w,h) which
+        // the caller derives from BakedWidth so the sprite's own aspect is preserved (text never
+        // stretches). Falls back to a procedural AddPillButton (tint + label) if the art is missing.
+        static Button AddBakedButton(Transform parent, string name, string spriteName, float x, float y,
+                                     float w, float h, string fbLabel, TMP_FontAsset fbFont, Color fbBg,
+                                     bool fbSecondary = false)
+        {
+            var sprite = Ui(spriteName);
+            if (sprite != null)
+            {
+                var img = AddImage(parent, name, sprite, Color.white);
+                img.raycastTarget = true;
+                Place(img.rectTransform, x, y, w, h);
+                return img.gameObject.AddComponent<Button>();
+            }
+            return AddPillButton(parent, name, fbLabel, fbFont, fbBg, Color.white, x, y, w, h * 0.9f, 40, secondary: fbSecondary);
+        }
+
+        // Width for a baked button at height h, from the sprite's own aspect (keeps text un-stretched).
+        static float BakedWidth(string spriteName, float h)
+        {
+            var s = Ui(spriteName);
+            return s != null ? h * s.rect.width / s.rect.height : 260f;
         }
 
         static Button AddPillButton(Transform parent, string name, string label, TMP_FontAsset font,

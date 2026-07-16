@@ -30,6 +30,15 @@
     { "file": "startbutton.png", "border": [0, 0, 0, 0] },
 
     { "file": "scorebadge.png", "border": [0, 0, 0, 0] },
-    { "file": "scorechange.png", "border": [0, 0, 0, 0] }
+    { "file": "scorechange.png", "border": [0, 0, 0, 0] },
+
+    { "file": "btn_resume.png", "border": [0, 0, 0, 0] },
+    { "file": "btn_playagain.png", "border": [0, 0, 0, 0] },
+    { "file": "btn_exit.png", "border": [0, 0, 0, 0] },
+    { "file": "btn_home.png", "border": [0, 0, 0, 0] },
+    { "file": "btn_endgame.png", "border": [0, 0, 0, 0] },
+    { "file": "btn_start.png", "border": [0, 0, 0, 0] },
+    { "file": "pop_safe.png", "border": [0, 0, 0, 0] },
+    { "file": "pop_danger.png", "border": [0, 0, 0, 0] }
   ]
 }

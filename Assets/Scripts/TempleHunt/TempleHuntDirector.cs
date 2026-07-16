@@ -9,7 +9,6 @@ using Kinex.Motion;
 using Kinex.UI;
 using Kinex.MegaDance;   // VoiceCoach
 using Kinex.Trainer;     // TrainerPoseData
-using Kinex.BattleGame;  // PoseGhost (reused as the movement-demo spirit)
 
 namespace Kinex.TempleHunt
 {

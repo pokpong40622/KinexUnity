@@ -20,6 +20,7 @@ namespace Kinex.AstroStance
         public int kickFouls;      // stood in a ring's lane at arrival
         public int sitStands;      // total stand reps during play (rehab dose)
         public int laneSteps;      // side-step lane changes (rehab dose)
+        public int kickReps;       // total side-kick motions during play (rehab dose)
         public int stars;          // 0-3
         public float durationSeconds;
     }
@@ -135,7 +136,12 @@ namespace Kinex.AstroStance
             for (int i = 0; i < BeatCount; i++)
             {
                 int lane = 0;
-                if (kinds[i] != AstroKind.Rest)
+                if (kinds[i] == AstroKind.Treasure)
+                {
+                    // Treasures only land center: the player sits in a chair fixed at the middle lane.
+                    lane = 0;
+                }
+                else if (kinds[i] != AstroKind.Rest)
                 {
                     lane = rng.Next(3) - 1;
                     if (lane == prevLane && lane == prevPrevLane)

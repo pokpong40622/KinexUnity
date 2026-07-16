@@ -114,16 +114,25 @@ namespace Kinex.AstroStance
         public Image scoreChangePopup;
         [Tooltip("The +1 / −1 number inside scoreChangePopup.")]
         public TMP_Text scoreChangeText;
+        [Tooltip("Picture popup shown ~1.2s on a safe meteor dodge (pop_safe.png 'ปลอดภัย!'). Hidden by default.")]
+        public Image feedbackSafe;
+        [Tooltip("Picture popup shown ~1.2s on a meteor hit / foul (pop_danger.png 'ระวัง!'). Hidden by default.")]
+        public Image feedbackDanger;
         [Tooltip("3 lane indicator dots, left→right.")]
         public Image[] laneDots = new Image[3];
         public TMP_Text countdownText;
+        [Tooltip("Badge/disc behind the 3-2-1 number so it reads over the bright park. Toggled with " +
+                 "the countdown text; hidden by default.")]
+        public GameObject countdownBadge;
 
         [Header("Results UI")]
         public TMP_Text resultScoreText;
+        [Tooltip("Dynamic praise headline (ทำได้ดีมาก! etc.) set from the star count at end of run.")]
+        public TMP_Text resultPraiseText;
         [Tooltip("3 star images, dimmed/lit by the director.")]
         public Image[] resultStars = new Image[3];
-        [Tooltip("Value texts for the rep rows: สมบัติ เตะ หลบ ลุก-นั่ง ก้าว.")]
-        public TMP_Text[] resultRepValues = new TMP_Text[5];
+        [Tooltip("Value texts for the rep rows: สมบัติ เตะ หลบ (game actions) then ลุก-นั่ง ก้าว เตะขา (poses).")]
+        public TMP_Text[] resultRepValues = new TMP_Text[6];
 
         public event Action<AstroResult> OnSessionComplete;
         public event Action OnExitRequested;
@@ -168,6 +177,7 @@ namespace Kinex.AstroStance
         float _timeLeft;
         float _toastTimer;
         Coroutine _scoreChangeRoutine;
+        Coroutine _feedbackRoutine;
         float _avatarBaseX;
         float _avatarBaseY;
         float _sitDip01;   // 0 = standing, 1 = fully dipped into the sit crouch (smoothed)
@@ -234,7 +244,11 @@ namespace Kinex.AstroStance
             // other games (their own MediaPipePoseDetector, their own sameSideRetarget default)
             // are unaffected. AstroStanceSceneBuilder.ConfigureDetector still seeds an editor-time
             // default, but this runtime push is authoritative from here on.
-            if (poseDetector != null) poseDetector.SameSideRetarget = !invertLateralForBackView;
+            // User confirmed on device: the kick SIDE and lane detection are correct, but the
+            // avatar's VISIBLE kicking leg was mirrored (player kicks right leg → avatar kicked its
+            // left). The avatar limb retarget is therefore decoupled from the detection flags and set
+            // to the opposite of before (dropped the `!`) so the shown leg matches the real one.
+            if (poseDetector != null) poseDetector.SameSideRetarget = invertLateralForBackView;
         }
 
 #if UNITY_EDITOR
@@ -275,13 +289,16 @@ namespace Kinex.AstroStance
                 _baseTreasureWindow = spawner.treasureWindowSeconds;
                 _baseRingWindow = spawner.ringWindowSeconds;
             }
-            ShowOnly(introPanel);
             if (hudPanel != null) hudPanel.SetActive(false);
-            SetPreviewVisible(false); // hide the camera preview until the player presses Start
             if (bodyLostIgnoreButton != null) bodyLostIgnoreButton.gameObject.SetActive(false);
             if (bodyLostToast != null) bodyLostToast.SetActive(false);
             UpdateScoreText();
             UpdateTimerText();
+
+            // The start/mission screen (logo, subtitle, instruction cards) now lives in Flutter,
+            // shown before Unity is even embedded — so introPanel is retired and every entry into
+            // this scene goes straight to Framing instead of waiting on OnStartPressed().
+            EnterFraming();
         }
 
         void Update()
@@ -419,6 +436,7 @@ namespace Kinex.AstroStance
             _state = State.Countdown;
             _countdownLeft = CountdownSeconds;
             if (hudPanel != null) hudPanel.SetActive(true);
+            if (countdownBadge != null) countdownBadge.SetActive(true);
             if (countdownText != null) countdownText.gameObject.SetActive(true);
         }
 
@@ -439,6 +457,7 @@ namespace Kinex.AstroStance
             if (_countdownLeft <= -0.5f)
             {
                 if (countdownText != null) countdownText.gameObject.SetActive(false);
+                if (countdownBadge != null) countdownBadge.SetActive(false);
                 EnterPlay();
             }
         }
@@ -471,17 +490,21 @@ namespace Kinex.AstroStance
         void ApplyDifficulty()
         {
             if (spawner == null) return;
-            float fallMul, beatMul, windowMul;
+            float fallMul, beatMul, windowMul, multiMeteor;
             switch (_difficulty)
             {
-                case AstroDifficulty.Easy: fallMul = 1.3f; beatMul = 1.2f; windowMul = 1.3f; break;
-                case AstroDifficulty.Hard: fallMul = 0.75f; beatMul = 0.85f; windowMul = 0.7f; break;
-                default /* Normal */:      fallMul = 1f;    beatMul = 1f;    windowMul = 1f;   break;
+                case AstroDifficulty.Easy: fallMul = 1.3f; beatMul = 1.05f; windowMul = 1.3f; multiMeteor = 0f; break;
+                case AstroDifficulty.Hard: fallMul = 0.75f; beatMul = 0.72f; windowMul = 0.7f; multiMeteor = 0.55f; break;
+                // Normal is deliberately a notch harder than the raw base numbers (user request):
+                // items fall a bit faster, beats come a little closer, timing windows a touch tighter,
+                // and a meteor beat sometimes storms a second lane (multiMeteor) so it's not one-at-a-time.
+                default /* Normal */:      fallMul = 0.88f; beatMul = 0.8f;  windowMul = 0.88f; multiMeteor = 0.25f; break;
             }
             spawner.fallSeconds = _baseFallSeconds * fallMul;
             spawner.beatInterval = _baseBeatInterval * beatMul;
             spawner.treasureWindowSeconds = _baseTreasureWindow * windowMul;
             spawner.ringWindowSeconds = _baseRingWindow * windowMul;
+            spawner.multiMeteorChance = multiMeteor;
         }
 
         // ---- Play: the 3-minute run. ----
@@ -657,6 +680,7 @@ namespace Kinex.AstroStance
             bool left = JustKickedLeft;
             bool right = JustKickedRight;
             if (!left && !right) return;
+            _result.kickReps++; // every side-kick motion counts toward the rehab dose, hit or not
 
             var ring = spawner != null ? spawner.ActiveItem(AstroKind.KickRing) : null;
             if (ring == null) return;
@@ -684,14 +708,14 @@ namespace Kinex.AstroStance
                         _result.score--;
                         UpdateScoreText();
                         ShowScorePop(-1);
-                        ShowToast("−1 โดนก้อนหิน!", ToastOrange);
+                        ShowFeedback(feedbackDanger); // picture popup "ระวัง!" (the −1 shows via ShowScorePop)
                         Kinex.Sfx.Play("hit_1", 0.8f);
                         if (shakeTarget != null) StartCoroutine(ShakeRoutine());
                     }
                     else
                     {
                         _result.dodges++;
-                        ShowToast("ปลอดภัย!", ChipPass);
+                        ShowFeedback(feedbackSafe); // picture popup "ปลอดภัย!"
                         Kinex.Sfx.Play("dodge", 0.5f);
                     }
                     break;
@@ -778,9 +802,10 @@ namespace Kinex.AstroStance
             _result.durationSeconds = sessionSeconds;
 
             if (resultScoreText != null) resultScoreText.text = AstroLogic.DisplayScore(_result.score).ToString();
+            if (resultPraiseText != null) resultPraiseText.text = PraiseFor(_result.stars);
             for (int i = 0; i < resultStars.Length; i++)
                 if (resultStars[i] != null) resultStars[i].color = i < _result.stars ? StarLit : StarDim;
-            int[] reps = { _result.treasures, _result.kicks, _result.dodges, _result.sitStands, _result.laneSteps };
+            int[] reps = { _result.treasures, _result.kicks, _result.dodges, _result.sitStands, _result.laneSteps, _result.kickReps };
             for (int i = 0; i < resultRepValues.Length && i < reps.Length; i++)
                 if (resultRepValues[i] != null) resultRepValues[i].text = reps[i].ToString();
 
@@ -793,6 +818,15 @@ namespace Kinex.AstroStance
             Kinex.Sfx.Play("fanfare", 0.8f);
             OnSessionComplete?.Invoke(_result);
         }
+
+        // Encouraging headline shown on the results card, tuned to how well the run went.
+        static string PraiseFor(int stars) => stars switch
+        {
+            3 => "ทำได้ดีมาก!",
+            2 => "เก่งมากเลย!",
+            1 => "ดีขึ้นเรื่อย ๆ นะ!",
+            _ => "สู้ ๆ นะ ครั้งหน้าทำได้!",
+        };
 
         // ---- Body-loss warning: first mid-game loss locks (with Ignore offered); after Ignore,
         //      later losses just toast and keep playing. See OnBodyLostIgnorePressed. ----
@@ -937,6 +971,36 @@ namespace Kinex.AstroStance
             _scoreChangeRoutine = null;
         }
 
+        // Picture feedback (ปลอดภัย! / ระวัง!) — pops the given popup in for ~1.2s. Only one shows at a
+        // time; a new call replaces the current one.
+        void ShowFeedback(Image which)
+        {
+            if (which == null) return;
+            if (_feedbackRoutine != null) StopCoroutine(_feedbackRoutine);
+            if (feedbackSafe != null) feedbackSafe.gameObject.SetActive(false);
+            if (feedbackDanger != null) feedbackDanger.gameObject.SetActive(false);
+            _feedbackRoutine = StartCoroutine(FeedbackRoutine(which));
+        }
+
+        System.Collections.IEnumerator FeedbackRoutine(Image which)
+        {
+            which.gameObject.SetActive(true);
+            var t = which.transform;
+            float time = 0f;
+            const float popTime = 0.14f, holdTime = 0.9f;
+            while (time < popTime)
+            {
+                time += Time.deltaTime;
+                float k = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(time / popTime));
+                t.localScale = Vector3.LerpUnclamped(Vector3.one * 0.6f, Vector3.one, k);
+                yield return null;
+            }
+            t.localScale = Vector3.one;
+            yield return new WaitForSeconds(holdTime);
+            which.gameObject.SetActive(false);
+            _feedbackRoutine = null;
+        }
+
         void ShowOnly(GameObject panel)
         {
             if (introPanel != null) introPanel.SetActive(panel == introPanel);
@@ -980,6 +1044,17 @@ namespace Kinex.AstroStance
             _manualPaused = false;
             if (pausePanel != null) pausePanel.SetActive(false);
             if (spawner != null) spawner.SetPaused(false);
+        }
+
+        /// <summary>Wired to the pause panel's "จบเกม" button — ends the run early and jumps straight
+        /// to the results screen (EndRun tallies the score/stars from whatever was collected so far).</summary>
+        public void OnEndGamePressed()
+        {
+            if (_state != State.Play) return;
+            _manualPaused = false;
+            if (spawner != null) spawner.SetPaused(false);
+            if (pausePanel != null) pausePanel.SetActive(false);
+            EndRun();
         }
 
         public void OnTogglePreviewPressed()

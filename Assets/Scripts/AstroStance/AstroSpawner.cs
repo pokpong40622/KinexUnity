@@ -37,6 +37,12 @@ namespace Kinex.AstroStance
         [Tooltip("Seconds a kick ring hovers waiting to be kicked.")]
         public float ringWindowSeconds = 6f;
 
+        [Header("Meteor storm")]
+        [Tooltip("Chance (0-1) that a METEOR beat drops a SECOND meteor in another lane at the " +
+                 "same time, so the player must pick the one safe lane. Set per-difficulty by the " +
+                 "director (0 = never on Easy). Two meteors never fill all three lanes.")]
+        public float multiMeteorChance = 0f;
+
         [Header("Wiring")]
         [Tooltip("FC Iconic SDF — the kick ring's Thai label. Wired by the scene builder.")]
         public TMP_FontAsset thaiFont;
@@ -106,11 +112,30 @@ namespace Kinex.AstroStance
         void SpawnBeat(AstroLogic.Beat beat)
         {
             if (beat.kind == AstroKind.Rest) return;
+            SpawnItem(beat.kind, beat.lane);
 
+            // Meteor storm: on harder settings a meteor beat sometimes drops a SECOND meteor in a
+            // different lane so two of the three lanes are dangerous and the player must step to the
+            // one safe lane. Never spawns a third — one lane always stays open to dodge into.
+            if (beat.kind == AstroKind.Meteor && multiMeteorChance > 0f &&
+                UnityEngine.Random.value < multiMeteorChance)
+                SpawnItem(AstroKind.Meteor, OtherLane(beat.lane));
+        }
+
+        // A random lane different from `lane` (three lanes: -1, 0, +1).
+        static int OtherLane(int lane)
+        {
+            int other = lane;
+            while (other == lane) other = UnityEngine.Random.Range(-1, 2);
+            return other;
+        }
+
+        void SpawnItem(AstroKind kind, int lane)
+        {
             GameObject go;
             Color telegraphColor;
             float endY, window;
-            switch (beat.kind)
+            switch (kind)
             {
                 case AstroKind.Meteor:
                     go = AstroProps.Meteor();
@@ -132,14 +157,14 @@ namespace Kinex.AstroStance
                     break;
             }
 
-            float x = LaneWorldX(beat.lane);
+            float x = LaneWorldX(lane);
             var telegraph = AstroProps.TelegraphRing(telegraphColor);
             telegraph.transform.SetParent(transform, false);
             telegraph.transform.position = new Vector3(x, 0f, impactZ);
 
             go.transform.SetParent(transform, false);
             var item = go.AddComponent<AstroItem>();
-            item.Init(beat.kind, beat.lane,
+            item.Init(kind, lane,
                       new Vector3(x, spawnHeight, impactZ),
                       new Vector3(x, endY, impactZ),
                       fallSeconds, window, telegraph);

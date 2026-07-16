@@ -32,7 +32,9 @@ namespace Kinex.SpikeTools
             // ARM64 devices are the only target. Emulators must be arm64-v8a images.
             PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
             EditorUserBuildSettings.exportAsGoogleAndroidProject = true;
-            EditorUserBuildSettings.development = false;
+            // true = faster IL2CPP compile (Debug config) for quick device-test iteration, at the
+            // cost of a bigger/slower-at-runtime binary. Flip back to false for a real release build.
+            EditorUserBuildSettings.development = true;
 
             if (Directory.Exists(ExportPath)) Directory.Delete(ExportPath, true);
             Directory.CreateDirectory(ExportPath);

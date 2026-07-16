@@ -156,8 +156,8 @@ namespace Kinex.AstroStance.EditorTools
             Check(director.resultScoreText != null, "wiring: result score");
             Check(director.resultStars != null && director.resultStars.Length == 3 && director.resultStars.All(s => s != null),
                 "wiring: 3 result stars");
-            Check(director.resultRepValues != null && director.resultRepValues.Length == 5 && director.resultRepValues.All(t => t != null),
-                "wiring: 5 result rep values");
+            Check(director.resultRepValues != null && director.resultRepValues.Length == 6 && director.resultRepValues.All(t => t != null),
+                "wiring: 6 result rep values");
             Check(director.useKeyboardStub, "config: stub ON in baked scene (Awake forces off on device)");
 
             var spawner = director.spawner;
