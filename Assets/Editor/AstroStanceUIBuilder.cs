@@ -101,26 +101,108 @@ namespace Kinex.AstroStance.EditorTools
             var intro = NewPanel(canvas.transform, "IntroPanel");
             intro.GetComponent<Image>().color = SpaceNavy;
 
-            var ringAccent = AddImage(intro.transform, "TitleRingAccent", knob, new Color(Indigo.r, Indigo.g, Indigo.b, 0.55f));
-            Place(ringAccent.rectTransform, 700, 8, 150, 150);
-            var titleStar = Ui("star_lit");
-            var starAccent = AddImage(intro.transform, "TitleStarAccent", titleStar != null ? titleStar : knob,
-                                      titleStar != null ? Color.white : Gold);
-            Place(starAccent.rectTransform, 744, 30, 70, 70);
+            // Full-bleed park background (bright sunny scene, aspect ~0.65 already close to the
+            // 927x1427 canvas' 0.65 — a straight stretch reads fine). Added first so every other
+            // intro element draws on top of it. Falls back to the plain SpaceNavy fill above if the
+            // art isn't built yet.
+            var introBg = Ui("astrostancestartpagebackground");
+            if (introBg != null)
+            {
+                var bgImg = AddImage(intro.transform, "Background", introBg, Color.white);
+                Stretch(bgImg.rectTransform);
+            }
 
-            var titleTop = AddText(intro.transform, "ASTRO", montserratBlack, 100, OffWhite, TextAlignmentOptions.Center);
-            Place(titleTop.rectTransform, 0, 58, FW, 118);
-            Outline(titleTop, Cyan, 0.2f);
-            var titleBottom = AddText(intro.transform, "STANCE", montserratBlack, 100, OffWhite, TextAlignmentOptions.Center);
-            Place(titleBottom.rectTransform, 0, 172, FW, 118);
-            Outline(titleBottom, Cyan, 0.2f);
+            // Logo replaces the old procedural ring/star + "ASTRO STANCE" text.
+            var logo = Ui("astrostancelogo");
+            if (logo != null)
+            {
+                var logoImg = AddImage(intro.transform, "Logo", logo, Color.white);
+                Place(logoImg.rectTransform, 250, 40, 428, 210);
+            }
+            else
+            {
+                var ringAccent = AddImage(intro.transform, "TitleRingAccent", knob, new Color(Indigo.r, Indigo.g, Indigo.b, 0.55f));
+                Place(ringAccent.rectTransform, 700, 8, 150, 150);
+                var titleStar = Ui("star_lit");
+                var starAccent = AddImage(intro.transform, "TitleStarAccent", titleStar != null ? titleStar : knob,
+                                          titleStar != null ? Color.white : Gold);
+                Place(starAccent.rectTransform, 744, 30, 70, 70);
 
+                var titleTop = AddText(intro.transform, "ASTRO", montserratBlack, 100, OffWhite, TextAlignmentOptions.Center);
+                Place(titleTop.rectTransform, 0, 58, FW, 118);
+                Outline(titleTop, Cyan, 0.2f);
+                var titleBottom = AddText(intro.transform, "STANCE", montserratBlack, 100, OffWhite, TextAlignmentOptions.Center);
+                Place(titleBottom.rectTransform, 0, 172, FW, 118);
+                Outline(titleBottom, Cyan, 0.2f);
+            }
+
+            // Outline added now that this sits over a photographic background instead of a flat fill.
             var subtitle = AddText(intro.transform, "ภารกิจเก็บสมบัติในสวน", thaiSemi, 44, DarkText, TextAlignmentOptions.Center);
-            Place(subtitle.rectTransform, 64, 305, 799, 70);
+            Place(subtitle.rectTransform, 64, 270, 799, 60);
+            Outline(subtitle, Color.white, 0.3f);
+
+            // Star badge (top-right) — matches the reference start page: a gold star on a leaf-green
+            // disc. Decorative for now (no handler); raycast off so it never blocks a tap.
+            var badgeBg = AddImage(intro.transform, "StarBadge", knob, new Color(0.55f, 0.76f, 0.44f));
+            badgeBg.raycastTarget = false;
+            Place(badgeBg.rectTransform, 786, 26, 108, 108);
+            var badgeStarSprite = Ui("star_lit");
+            var badgeStar = AddImage(intro.transform, "StarBadgeStar",
+                badgeStarSprite != null ? badgeStarSprite : knob, badgeStarSprite != null ? Color.white : Gold);
+            badgeStar.raycastTarget = false;
+            Place(badgeStar.rectTransform, 810, 50, 60, 60);
 
             BuildHowToCards(intro.transform, thaiSemi, knob);
 
-            var startBtn = AddPillButton(intro.transform, "StartButton", "เริ่มภารกิจ", thaiSemi, Cyan, Color.white, 213, 1250, 500, 120, 56);
+            // ---- Difficulty (ง่าย / ปกติ / ยาก) ----
+            // AstroDifficultySelector (Assets/Scripts/AstroStance/AstroDifficultySelector.cs) is a
+            // tiny new helper component: UnityEventTools has no persistent-listener overload that can
+            // pass an ENUM argument (AddIntPersistentListener needs a UnityAction<int>, and
+            // SetDifficulty takes AstroDifficulty — that method-group-to-delegate conversion doesn't
+            // compile), so each button below wires to one of the selector's plain void SelectX()
+            // methods instead, via the same AddPersistentListener pattern as every other button here.
+            var diffLabel = AddText(intro.transform, "เลือกระดับความยาก", thaiSemi, 32, DarkText, TextAlignmentOptions.Center);
+            Place(diffLabel.rectTransform, 64, 752, 799, 40);
+            Outline(diffLabel, Color.white, 0.3f);
+
+            const float diffW = 220f, diffH = 88f, diffGap = 24f;
+            float diffMarginX = (FW - (3 * diffW + 2 * diffGap)) * 0.5f;
+            var easyBtn = AddPillButton(intro.transform, "DifficultyEasyButton", "ง่าย", thaiSemi, Cyan, Color.white,
+                diffMarginX, 798, diffW, diffH, 38);
+            var normalBtn = AddPillButton(intro.transform, "DifficultyNormalButton", "ปกติ", thaiSemi, Cyan, Color.white,
+                diffMarginX + (diffW + diffGap), 798, diffW, diffH, 38);
+            var hardBtn = AddPillButton(intro.transform, "DifficultyHardButton", "ยาก", thaiSemi, Cyan, Color.white,
+                diffMarginX + 2 * (diffW + diffGap), 798, diffW, diffH, 38);
+
+            var diffSelectorGo = new GameObject("DifficultySelector", typeof(RectTransform));
+            diffSelectorGo.transform.SetParent(intro.transform, false);
+            var diffSelector = diffSelectorGo.AddComponent<AstroDifficultySelector>();
+            diffSelector.director = director;
+            diffSelector.easyBg = easyBtn.GetComponent<Image>();
+            diffSelector.normalBg = normalBtn.GetComponent<Image>();
+            diffSelector.hardBg = hardBtn.GetComponent<Image>();
+            diffSelector.ApplyInitialHighlight(); // preview the default (Normal) tint before Play mode
+
+            UnityEditor.Events.UnityEventTools.AddPersistentListener(easyBtn.onClick, diffSelector.SelectEasy);
+            UnityEditor.Events.UnityEventTools.AddPersistentListener(normalBtn.onClick, diffSelector.SelectNormal);
+            UnityEditor.Events.UnityEventTools.AddPersistentListener(hardBtn.onClick, diffSelector.SelectHard);
+
+            // Start button: startbutton.png bakes in its own "เริ่มภารกิจ" label, so (unlike
+            // AddPillButton) no separate TMP text child is added on top of it. Falls back to the
+            // original procedural pill + text if the art isn't built yet.
+            var startSprite = Ui("startbutton");
+            Button startBtn;
+            if (startSprite != null)
+            {
+                var startImg = AddImage(intro.transform, "StartButton", startSprite, Color.white);
+                startImg.raycastTarget = true;
+                Place(startImg.rectTransform, 214, 1200, 500, 130);
+                startBtn = startImg.gameObject.AddComponent<Button>();
+            }
+            else
+            {
+                startBtn = AddPillButton(intro.transform, "StartButton", "เริ่มภารกิจ", thaiSemi, Cyan, Color.white, 213, 1250, 500, 120, 56);
+            }
             UnityEditor.Events.UnityEventTools.AddPersistentListener(startBtn.onClick, director.OnStartPressed);
 
             // =================== FRAMING ===================
@@ -164,6 +246,14 @@ namespace Kinex.AstroStance.EditorTools
             framingHoldRing.fillClockwise = true;
             framingHoldRing.fillAmount = 0f;
             Place(framingHoldRing.rectTransform, 404, 680, 120, 120);
+
+            // Body-loss "ignore" button (Contract 2). Lives on the SAME FramingPanel used both for
+            // the initial pre-Start guide-in and the mid-game body-loss lock — the director owns its
+            // visibility and must only ever show it for the latter, so it starts hidden here and stays
+            // that way until the director explicitly activates it (see initial active-states below).
+            var bodyLostIgnoreBtn = AddPillButton(framing.transform, "BodyLostIgnoreButton", "ข้ามการเตือน",
+                thaiSemi, Gray, Color.white, 314, 820, 300, 80, 34, secondary: true);
+            UnityEditor.Events.UnityEventTools.AddPersistentListener(bodyLostIgnoreBtn.onClick, director.OnBodyLostIgnorePressed);
 
             // =================== CALIBRATION (canvas-level sibling — see class doc) ===================
             var calibGroup = NewPanel(canvas.transform, "CalibGroup");
@@ -257,6 +347,33 @@ namespace Kinex.AstroStance.EditorTools
             toastText.raycastTarget = false;
             Place(toastText.rectTransform, 64, 500, 799, 90);
             Outline(toastText, new Color(0f, 0f, 0f, 0.6f), 0.25f);
+
+            // -- Body-loss warning popup (Contract 2), centered, hidden by default. --
+            // LOGIC shows this ~3s if the body is lost AFTER the player has already pressed
+            // "ignore" (bodyLostIgnoreBtn above) during a mid-game lock, without bouncing back to
+            // Framing. Styled like the main toast above (same toast.png + outlined text pattern),
+            // just a separate GameObject since the director drives its active state directly
+            // (SetActive) rather than the main toast's fade-timer.
+            var bodyLostToastGo = new GameObject("BodyLostToast", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            var bodyLostToastRt = (RectTransform)bodyLostToastGo.transform;
+            bodyLostToastRt.SetParent(hud.transform, false);
+            Place(bodyLostToastRt, 114, 950, 700, 110);
+            var bodyLostToastBg = bodyLostToastGo.GetComponent<Image>();
+            bodyLostToastBg.raycastTarget = false;
+            if (toastSprite != null)
+            {
+                bodyLostToastBg.sprite = toastSprite;
+                bodyLostToastBg.type = Image.Type.Sliced;
+                bodyLostToastBg.color = Color.white;
+            }
+            else
+            {
+                bodyLostToastBg.color = GlassBg; // same fallback look as AddChip's missing-art case
+                Round(bodyLostToastBg);
+            }
+            var bodyLostToastText = AddText(bodyLostToastRt, "ขยับให้เห็นทั้งตัว", thaiBlack, 48, MeteorOrange, TextAlignmentOptions.Center);
+            Stretch(bodyLostToastText.rectTransform);
+            Outline(bodyLostToastText, new Color(0f, 0f, 0f, 0.6f), 0.25f);
 
             // -- Countdown, huge center, initially inactive. --
             var countdownText = AddText(hud.transform, "3", montserratBlack, 200, OffWhite, TextAlignmentOptions.Center);
@@ -368,6 +485,8 @@ namespace Kinex.AstroStance.EditorTools
             Assign(so, "toastBg", toastBg);
             Assign(so, "countdownText", countdownText);
             Assign(so, "resultScoreText", resultScoreText);
+            Assign(so, "bodyLostIgnoreButton", bodyLostIgnoreBtn);
+            AssignGo(so, "bodyLostToast", bodyLostToastGo);
 
             AssignArray(so, "framingChips", framingChips);
             AssignArray(so, "laneDots", laneDots);
@@ -385,6 +504,10 @@ namespace Kinex.AstroStance.EditorTools
             results.SetActive(false);
             feedPanel.SetActive(true); // the detector finds this RawImage at Start
             previewToggleBtn.gameObject.SetActive(true);
+            // Both hidden regardless of their parent panel's own active state (Contract 2) — the
+            // director is the only thing that ever turns these on, for a MID-GAME body-loss lock.
+            bodyLostIgnoreBtn.gameObject.SetActive(false);
+            bodyLostToastGo.SetActive(false);
 
             EditorUtility.SetDirty(director);
             EditorUtility.SetDirty(canvas.gameObject);
@@ -392,61 +515,72 @@ namespace Kinex.AstroStance.EditorTools
             return "AstroStance UI rebuilt and wired to AstroStanceDirector.";
         }
 
-        // ---- 3 how-to cards: side-step / sit-stand / kick, each a bright cream card with a
-        // small pictogram built from primitive shapes + a Thai caption. ----
+        // ---- 3 how-to cards: side-step / sit-stand / kick. ----
+        // sidewalkcard.png / sitcard.png / kickcard.png already bake in their own rounded card
+        // frame + Thai caption (art direction moved the whole card to a single designed image), so
+        // when present each card is just that one Image — no separate AddCard/icon/caption. Falls
+        // back to the original procedural cream card + pictogram + caption per card when its art is
+        // missing, so the intro still builds without it.
         static void BuildHowToCards(Transform parent, TMP_FontAsset thaiSemi, Sprite knob)
         {
-            const float cardW = 270f, cardH = 330f, cardY = 420f;
-            float[] xs = { 29f, 328f, 627f };
-            string[] captions =
+            const float cardW = 250f, cardH = 384f;
+            float[] xs = { 40f, 339f, 638f };
+            float[] ys = { 382f, 318f, 382f }; // middle card raised for the staggered reference look
+            string[] cardSprites = { "sidewalkcard", "sitcard", "kickcard" };
+            string[] icons = { "icon_step", "icon_sit", "icon_kick" }; // fallback-only
+            string[] captions = // fallback-only
             {
                 "ก้าวข้าง หลบก้อนหิน",
                 "นั่งแล้วลุก เก็บสมบัติ",
                 "เตะวงแหวนจากเลนข้าง ๆ",
             };
 
-            // One designed icon per card (step aside / sit-to-stand / kick). PNG-first per the
-            // image-only UI direction; the procedural pictogram below is only a fallback for a
-            // missing sprite so the intro still builds.
-            string[] icons = { "icon_step", "icon_sit", "icon_kick" };
-
             for (int i = 0; i < 3; i++)
             {
                 float x = xs[i];
+                float cardY = ys[i];
+                var cardArt = Ui(cardSprites[i]);
+                if (cardArt != null)
+                {
+                    var img = AddImage(parent, "Card", cardArt, Color.white);
+                    Place(img.rectTransform, x, cardY, cardW, cardH);
+                    continue;
+                }
+
                 // Pictograms + captions are siblings of the card (added after it, so they draw on
-                // top): Place() uses CANVAS-space coords, so children of the 270px card would land
-                // wrong — anchors are fractions of the PARENT rect.
+                // top): Place() uses CANVAS-space coords, so children of the card would land wrong —
+                // anchors are fractions of the PARENT rect.
                 AddCard(parent, x, cardY, cardW, cardH);
 
                 var icon = Ui(icons[i]);
                 if (icon != null)
                 {
-                    const float iconSize = 130f;
-                    var img = AddImage(parent, "Picto", icon, Color.white);
-                    Place(img.rectTransform, x + (cardW - iconSize) / 2f, cardY + 40, iconSize, iconSize);
+                    const float iconSize = 120f;
+                    var iconImg = AddImage(parent, "Picto", icon, Color.white);
+                    Place(iconImg.rectTransform, x + (cardW - iconSize) / 2f, cardY + 36, iconSize, iconSize);
                 }
                 else switch (i)
                 {
                     case 0: // side-step: person dot + left/right arrow bars
-                        AddPictoDot(parent, knob, OffWhite, x + 105, cardY + 60, 60);
-                        AddPictoBar(parent, Cyan, x + 30, cardY + 88, 60, 14, -20f);
-                        AddPictoBar(parent, Cyan, x + 180, cardY + 88, 60, 14, 20f);
+                        AddPictoDot(parent, knob, OffWhite, x + 95, cardY + 56, 56);
+                        AddPictoBar(parent, Cyan, x + 26, cardY + 82, 56, 13, -20f);
+                        AddPictoBar(parent, Cyan, x + 168, cardY + 82, 56, 13, 20f);
                         break;
                     case 1: // sit-stand: chair-ish seat + backrest
-                        AddPictoBar(parent, Gold, x + 85, cardY + 130, 100, 20, 0f);
-                        AddPictoBar(parent, Gold, x + 85, cardY + 60, 20, 90, 0f);
+                        AddPictoBar(parent, Gold, x + 78, cardY + 120, 94, 18, 0f);
+                        AddPictoBar(parent, Gold, x + 78, cardY + 56, 18, 84, 0f);
                         break;
                     default: // kick: leg-line + ring
-                        AddPictoBar(parent, OffWhite, x + 165, cardY + 90, 14, 110, 0f);
+                        AddPictoBar(parent, OffWhite, x + 153, cardY + 84, 13, 102, 0f);
                         var ringOuter = AddImage(parent, "RingOuter", knob, new Color(Cyan.r, Cyan.g, Cyan.b, 0.85f));
-                        Place(ringOuter.rectTransform, x + 40, cardY + 60, 70, 70);
+                        Place(ringOuter.rectTransform, x + 37, cardY + 56, 65, 65);
                         var ringInner = AddImage(parent, "RingInner", knob, GlassBg);
-                        Place(ringInner.rectTransform, x + 55, cardY + 75, 40, 40);
+                        Place(ringInner.rectTransform, x + 51, cardY + 70, 37, 37);
                         break;
                 }
 
-                var caption = AddText(parent, captions[i], thaiSemi, 36, OffWhite, TextAlignmentOptions.Center);
-                Place(caption.rectTransform, x + 10, cardY + 190, cardW - 20, 130);
+                var caption = AddText(parent, captions[i], thaiSemi, 34, OffWhite, TextAlignmentOptions.Center);
+                Place(caption.rectTransform, x + 10, cardY + 216, cardW - 20, 150);
             }
         }
 

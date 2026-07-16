@@ -20,6 +20,13 @@
     { "file": "icon_kick.png", "border": [0, 0, 0, 0] },
     { "file": "icon_dodge.png", "border": [0, 0, 0, 0] },
     { "file": "icon_sit.png", "border": [0, 0, 0, 0] },
-    { "file": "icon_step.png", "border": [0, 0, 0, 0] }
+    { "file": "icon_step.png", "border": [0, 0, 0, 0] },
+
+    { "file": "astrostancestartpagebackground.png", "border": [0, 0, 0, 0] },
+    { "file": "astrostancelogo.png", "border": [0, 0, 0, 0] },
+    { "file": "sidewalkcard.png", "border": [0, 0, 0, 0] },
+    { "file": "sitcard.png", "border": [0, 0, 0, 0] },
+    { "file": "kickcard.png", "border": [0, 0, 0, 0] },
+    { "file": "startbutton.png", "border": [0, 0, 0, 0] }
   ]
 }

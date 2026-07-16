@@ -105,7 +105,12 @@ public class MediaPipePoseDetector : MonoBehaviour
              "'follow me', so the player's right limb must drive the avatar's right limb. " +
              "Default OFF — front-facing scenes are unchanged.")]
     [SerializeField] bool sameSideRetarget = false;
-    public bool SameSideRetarget => sameSideRetarget;
+    // Settable (not just gettable) so a scene's director can push the correct value at runtime —
+    // AstroStance does this in Awake() to keep its master lateral-mirror flag (one Inspector bool)
+    // in agreement with the lane/kick-side logic that reads the same raw landmarks. Purely a plain
+    // field toggle: it only affects THIS detector instance, so other scenes/games are unaffected
+    // unless they also choose to call the setter.
+    public bool SameSideRetarget { get => sameSideRetarget; set => sameSideRetarget = value; }
     [SerializeField] bool flipY = true;   // Android front cam: body needs Y-flip to appear upright
     [SerializeField] bool flipZ = false;
 

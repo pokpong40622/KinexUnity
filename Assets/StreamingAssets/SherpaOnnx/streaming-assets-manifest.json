@@ -1,8 +1,10 @@
 {
-    "version": "362_195149793",
-    "totalSizeBytes": 195149793,
+    "version": "364_195150079",
+    "totalSizeBytes": 195150079,
     "files": [],
     "shared": [
+        "SherpaOnnx/asr-settings.json",
+        "SherpaOnnx/online-asr-settings.json",
         "SherpaOnnx/tts-settings.json"
     ],
     "profileGroups": [

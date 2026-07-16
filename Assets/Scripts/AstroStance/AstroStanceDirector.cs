@@ -12,12 +12,15 @@ namespace Kinex.AstroStance
     /// claims landed treasure, side-kick (p9) pops kick rings from an ADJACENT lane.
     /// Flow: Intro → Framing (FullBodyGate, Thai prompts) → stand-still Calibration →
     /// 3-2-1 Countdown → Play (fixed 28-beat deck) → Results. Losing the body mid-run
-    /// safety-pauses back into Framing and resumes through the countdown.
+    /// safety-pauses back into Framing (Ignore button offered — see HandleBodyLost) and
+    /// resumes through the countdown, unless the player has opted out via Ignore.
     ///
     /// Lane conventions: gameplay lanes are SCREEN space (-1 left / +1 right behind the
-    /// avatar). The raw LaneDetector sign is image space where player-left = frame-right
-    /// (verified against recorded tablet feeds in AstroFeedReplayTest), so the live path
-    /// inverts it — the avatar then steps the same direction the player does.
+    /// avatar). The raw LaneDetector sign is image space (player-left = frame-right for an
+    /// unmirrored front camera, verified against recorded tablet feeds in AstroFeedReplayTest);
+    /// invertLateralForBackView is the single master flag that reconciles that raw sign — and
+    /// the matching kick-side and avatar-limb conventions — with what the LIVE camera actually
+    /// produces (see its tooltip; the two can differ from a mirroring mismatch).
     /// </summary>
     public class AstroStanceDirector : MonoBehaviour
     {
@@ -27,9 +30,18 @@ namespace Kinex.AstroStance
         public MediaPipePoseDetector poseDetector;
         [Tooltip("Editor keyboard mode (←/→ lane, S sit/stand, N/M side kick). Forced OFF on device in Awake.")]
         public bool useKeyboardStub = true;
-        [Tooltip("Raw image-space lane sign → screen-space lanes for the behind view. " +
-                 "True is correct for an unmirrored front camera (verified on real feeds).")]
-        public bool invertLaneForBackView = true;
+        [Tooltip("MASTER lateral-mirror correction for the live front camera. AstroStance is a " +
+                 "behind-view game, so the player's real left/right must agree across THREE things " +
+                 "that all read the same raw MediaPipe landmarks: which lane a side-step lands in, " +
+                 "which foot a side-kick registers as, and which of the avatar's own arms/legs a " +
+                 "raised limb drives (the latter via poseDetector.SameSideRetarget, pushed in Awake). " +
+                 "A camera-mirroring mismatch flips all three together — confirmed on-device: raising " +
+                 "the real right hand raised the avatar's LEFT, stepping right moved the LEFT lane, " +
+                 "and a right kick registered as a left kick. TRUE (default) applies the correction " +
+                 "that fixes that. If it's still backwards after this build, there is only one other " +
+                 "possible lateral convention — flip this ONE value to FALSE (restores the original, " +
+                 "pre-fix mapping) rather than hunting through the three call sites individually.")]
+        public bool invertLateralForBackView = true;
 
         [Header("Avatar")]
         [Tooltip("Wrapper the lane locomotion slides sideways. The character model is its child.")]
@@ -55,6 +67,15 @@ namespace Kinex.AstroStance
         public float sessionSeconds = 180f;
         [Tooltip("0 = random deck each run; any other value replays the same deck (testing).")]
         public int deckSeed = 0;
+
+        [Header("Body-loss warning")]
+        [Tooltip("Ignore button on the framing/lock panel — assigned by the UI builder, hidden by " +
+                 "default. Only shown on a MID-GAME body-loss lock, never on the initial pre-Start " +
+                 "framing. Pressing it (OnBodyLostIgnorePressed) stops future losses from locking.")]
+        public Button bodyLostIgnoreButton;
+        [Tooltip("Small warning popup ('ขยับให้เห็นทั้งตัว') shown ~3s at a time once the player has " +
+                 "pressed Ignore and the body is lost again mid-run. Hidden by default.")]
+        public GameObject bodyLostToast;
 
         [Header("Camera shake")]
         [Tooltip("Shaken briefly on a meteor hit. Wire the Main Camera transform.")]
@@ -108,6 +129,7 @@ namespace Kinex.AstroStance
         const float CalibMoveTolerance = 0.03f;
         const float CountdownSeconds = 3f;
         const float ToastSeconds = 1.5f;
+        const float BodyLostToastSeconds = 3f; // how long the post-ignore "keep moving" popup stays up
 
         // Bright sunny-park palette (matches AstroStanceUIBuilder). ChipPass/Green, ChipFail/coral,
         // and the toast/star accents are kept saturated since they sit on solid fills or always
@@ -155,6 +177,13 @@ namespace Kinex.AstroStance
         AstroResult _result = new AstroResult();
 
         float _bodyLostTimer; // seconds every joint group has been MISSING (drives the play→framing bounce)
+        bool _bodyWarnIgnored;    // true once the player has pressed Ignore — later losses toast, not lock
+        float _bodyLostToastTimer; // counts down while bodyLostToast is showing
+
+        AstroDifficulty _difficulty = AstroDifficulty.Normal;
+        // AstroSpawner's own Inspector values, captured once at Start so ApplyDifficulty can scale
+        // FROM the designer's actual numbers instead of hard-coded duplicates (Normal always == these).
+        float _baseFallSeconds, _baseBeatInterval, _baseTreasureWindow, _baseRingWindow;
 
         // ---- Motion facade: the one place that switches stub vs live detectors. ----
         bool HasLivePose => poseDetector != null && poseDetector.HasPose;
@@ -177,16 +206,29 @@ namespace Kinex.AstroStance
         }
         bool JustStood => useKeyboardStub ? _stub.JustStood : _sit.JustStood;
         bool JustSat => useKeyboardStub ? _stub.JustSat : _sit.JustSat;
-        bool JustKickedLeft => useKeyboardStub ? _stub.JustKickedLeft : _sideKick.JustKickedLeft;
-        bool JustKickedRight => useKeyboardStub ? _stub.JustKickedRight : _sideKick.JustKickedRight;
+        // Kick side, gated by the same master flag as PlayerLane below — see invertLateralForBackView's
+        // tooltip. When the correction is on, the raw detector's Left/Right are swapped so JustKickedLeft
+        // means the player's real left foot kicked, not the raw (possibly camera-mirrored) detector side.
+        bool JustKickedLeft => useKeyboardStub ? _stub.JustKickedLeft
+            : (invertLateralForBackView ? _sideKick.JustKickedRight : _sideKick.JustKickedLeft);
+        bool JustKickedRight => useKeyboardStub ? _stub.JustKickedRight
+            : (invertLateralForBackView ? _sideKick.JustKickedLeft : _sideKick.JustKickedRight);
         int PlayerLane => useKeyboardStub
             ? _stub.Lane
-            : (invertLaneForBackView ? -_lane.Lane : _lane.Lane);
+            : (invertLateralForBackView ? _lane.Lane : -_lane.Lane);
 
         void Awake()
         {
             // A tablet has no keyboard: stub mode there would soft-lock the game. Force off.
             if (!Application.isEditor && poseDetector != null) useKeyboardStub = false;
+
+            // Third leg of the master lateral-mirror correction (see invertLateralForBackView's
+            // tooltip): keep the avatar's own limb mapping in agreement with PlayerLane/kick-side
+            // above. This ONLY touches the detector instance THIS scene's director points at, so
+            // other games (their own MediaPipePoseDetector, their own sameSideRetarget default)
+            // are unaffected. AstroStanceSceneBuilder.ConfigureDetector still seeds an editor-time
+            // default, but this runtime push is authoritative from here on.
+            if (poseDetector != null) poseDetector.SameSideRetarget = !invertLateralForBackView;
         }
 
 #if UNITY_EDITOR
@@ -222,10 +264,16 @@ namespace Kinex.AstroStance
             {
                 spawner.ItemArrived += OnItemArrived;
                 spawner.ItemExpired += OnItemExpired;
+                _baseFallSeconds = spawner.fallSeconds;
+                _baseBeatInterval = spawner.beatInterval;
+                _baseTreasureWindow = spawner.treasureWindowSeconds;
+                _baseRingWindow = spawner.ringWindowSeconds;
             }
             ShowOnly(introPanel);
             if (hudPanel != null) hudPanel.SetActive(false);
             SetPreviewVisible(false); // hide the camera preview until the player presses Start
+            if (bodyLostIgnoreButton != null) bodyLostIgnoreButton.gameObject.SetActive(false);
+            if (bodyLostToast != null) bodyLostToast.SetActive(false);
             UpdateScoreText();
             UpdateTimerText();
         }
@@ -246,6 +294,7 @@ namespace Kinex.AstroStance
             }
 
             TickToast(dt);
+            TickBodyLostToast(dt);
         }
 
         void TickMotion(float dt)
@@ -278,6 +327,9 @@ namespace Kinex.AstroStance
             if (introPanel != null) introPanel.SetActive(false);
             SetPreviewVisible(true); // the run has begun — show the live camera preview from here on
             if (_runStarted && spawner != null) spawner.SetPaused(true);
+            // Default OFF every time framing is entered — the initial pre-Start pass NEVER shows it;
+            // HandleBodyLost turns it on right after calling this, ONLY for a mid-game lock.
+            if (bodyLostIgnoreButton != null) bodyLostIgnoreButton.gameObject.SetActive(false);
         }
 
         void TickFraming()
@@ -367,8 +419,13 @@ namespace Kinex.AstroStance
         void TickCountdown(float dt)
         {
             // Losing the body during the countdown bounces back to framing (seated span-shrink is
-            // tolerated — only a genuinely missing joint group counts as lost).
-            if (!useKeyboardStub && _bodyLostTimer > BodyLostSeconds) { EnterFraming(); return; }
+            // tolerated — only a genuinely missing joint group counts as lost). Once the player has
+            // pressed Ignore, HandleBodyLost toasts instead and leaves the countdown running.
+            if (!useKeyboardStub && _bodyLostTimer > BodyLostSeconds)
+            {
+                HandleBodyLost();
+                if (_state != State.Countdown) return; // bounced to Framing
+            }
 
             _countdownLeft -= dt;
             if (countdownText != null)
@@ -386,17 +443,51 @@ namespace Kinex.AstroStance
             if (!_runStarted)
             {
                 _runStarted = true;
+                ApplyDifficulty(); // tune the spawner BEFORE the deck starts (Easy/Normal/Hard)
                 int seed = deckSeed != 0 ? deckSeed : UnityEngine.Random.Range(1, int.MaxValue);
                 if (spawner != null) spawner.BeginRun(AstroLogic.BuildDeck(seed));
             }
             else if (spawner != null) spawner.SetPaused(false);
         }
 
+        // ---- Difficulty: chosen on the intro screen, applied once at the true start of the run. ----
+
+        /// <summary>Safe to call anytime (e.g. from the intro screen's Easy/Normal/Hard buttons);
+        /// only takes effect on the spawner when the run actually begins (EnterPlay).</summary>
+        public void SetDifficulty(AstroDifficulty d) => _difficulty = d;
+        public AstroDifficulty CurrentDifficulty => _difficulty;
+
+        // Difficulty → spawner tuning. Scales the DESIGNER'S OWN Inspector numbers (captured in
+        // Start) rather than hard-coding duplicates, so Normal is always exactly "whatever the
+        // spawner is set to" and Easy/Hard stay proportionally more/less forgiving if those base
+        // numbers are ever retuned. Easy = slower falls, more space between beats, more time to
+        // react/claim/kick. Hard = the opposite. A small explicit table — no new manager class.
+        void ApplyDifficulty()
+        {
+            if (spawner == null) return;
+            float fallMul, beatMul, windowMul;
+            switch (_difficulty)
+            {
+                case AstroDifficulty.Easy: fallMul = 1.3f; beatMul = 1.2f; windowMul = 1.3f; break;
+                case AstroDifficulty.Hard: fallMul = 0.75f; beatMul = 0.85f; windowMul = 0.7f; break;
+                default /* Normal */:      fallMul = 1f;    beatMul = 1f;    windowMul = 1f;   break;
+            }
+            spawner.fallSeconds = _baseFallSeconds * fallMul;
+            spawner.beatInterval = _baseBeatInterval * beatMul;
+            spawner.treasureWindowSeconds = _baseTreasureWindow * windowMul;
+            spawner.ringWindowSeconds = _baseRingWindow * windowMul;
+        }
+
         // ---- Play: the 3-minute run. ----
 
         void TickPlay(float dt)
         {
-            if (!useKeyboardStub && _bodyLostTimer > BodyLostSeconds) { EnterFraming(); return; }
+            // Same ignore-aware handling as TickCountdown — see HandleBodyLost.
+            if (!useKeyboardStub && _bodyLostTimer > BodyLostSeconds)
+            {
+                HandleBodyLost();
+                if (_state != State.Play) return; // bounced to Framing
+            }
 
             _timeLeft -= dt;
             UpdateTimerText();
@@ -693,6 +784,36 @@ namespace Kinex.AstroStance
             OnSessionComplete?.Invoke(_result);
         }
 
+        // ---- Body-loss warning: first mid-game loss locks (with Ignore offered); after Ignore,
+        //      later losses just toast and keep playing. See OnBodyLostIgnorePressed. ----
+
+        void HandleBodyLost()
+        {
+            if (!_bodyWarnIgnored)
+            {
+                // First mid-game body-loss (or the player never pressed Ignore): the existing
+                // safety lock, but with the Ignore button visible this time.
+                EnterFraming();
+                if (bodyLostIgnoreButton != null) bodyLostIgnoreButton.gameObject.SetActive(true);
+                return;
+            }
+
+            // Already ignored once this session: don't bounce back to Framing again — a brief,
+            // throttled toast instead (won't re-trigger while one is still showing), and keep playing.
+            if (_bodyLostToastTimer <= 0f)
+            {
+                _bodyLostToastTimer = BodyLostToastSeconds;
+                if (bodyLostToast != null) bodyLostToast.SetActive(true);
+            }
+        }
+
+        void TickBodyLostToast(float dt)
+        {
+            if (_bodyLostToastTimer <= 0f) return;
+            _bodyLostToastTimer -= dt;
+            if (_bodyLostToastTimer <= 0f && bodyLostToast != null) bodyLostToast.SetActive(false);
+        }
+
         // ---- HUD helpers. ----
 
         void UpdateScoreText()
@@ -753,6 +874,19 @@ namespace Kinex.AstroStance
         {
             if (_state != State.Intro) return;
             EnterFraming();
+        }
+
+        /// <summary>Wired to bodyLostIgnoreButton.onClick. Opts out of future body-loss LOCKS for
+        /// the rest of this session (later losses just toast — see HandleBodyLost) and immediately
+        /// resumes play, matching the contract's "hides the lock, resumes play".</summary>
+        public void OnBodyLostIgnorePressed()
+        {
+            _bodyWarnIgnored = true;
+            if (bodyLostIgnoreButton != null) bodyLostIgnoreButton.gameObject.SetActive(false);
+            _bodyLostTimer = 0f; // don't immediately re-trigger this same frame
+            if (framingPanel != null) framingPanel.SetActive(false);
+            if (calibGroup != null) calibGroup.SetActive(false);
+            EnterPlay(); // _runStarted is already true here, so this just unpauses + resumes Play
         }
 
         public void OnPausePressed()

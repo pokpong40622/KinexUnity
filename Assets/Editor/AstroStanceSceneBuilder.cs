@@ -256,7 +256,10 @@ namespace Kinex.AstroStance.EditorTools
         // bright sky dome, a warm sun, drifting clouds, roadside trees, pollen + butterflies. ----
         static void BuildAstroStage(Transform parent)
         {
-            var sky = ProceduralSkybox.CreateSkyDome(top: SkyTop, horizon: SkyPale, radius: 120f);
+            // Big radius so the tall distant mountains (z ~140-205) sit INSIDE the dome — the dome
+            // is opaque and depth-writing, so anything beyond its radius gets clipped/hidden (that's
+            // why the earlier far mountains never showed).
+            var sky = ProceduralSkybox.CreateSkyDome(top: SkyTop, horizon: SkyPale, radius: 350f);
             sky.transform.SetParent(parent, false);
             ProceduralSkybox.SetAmbient(
                 sky: new Color(0.60f, 0.70f, 0.82f),
@@ -329,15 +332,24 @@ namespace Kinex.AstroStance.EditorTools
 
             BuildSun(parent);
             BuildClouds(parent);
+            BuildFarMountains(parent);   // faint blue ridge FAR behind the hills (layered depth)
             BuildDistantScenery(parent);
             BuildSideScenery(parent);
+            BuildBackgroundForest(parent); // dense tree band filling the mid-distance up to the hills
+            BuildBushes(parent);         // rounded shrubs along the grass verges
+            BuildFlowerBeds(parent);     // colored flower dots on the verges
             BuildPollen(parent);
+            BuildBirds(parent);          // bird silhouettes gliding across the sky
 
-            // A couple of butterflies drifting over the lanes for a touch of life (runtime motion).
+            // A few butterflies drifting over the lanes for a touch of life (runtime motion).
             var flutter1 = Butterfly.Spawn(new Vector3(-1.2f, 1.1f, 3.5f), new Vector3(1.2f, 0.5f, 1.5f), new Color(1f, 0.62f, 0.2f));
             flutter1.transform.SetParent(parent, false);
             var flutter2 = Butterfly.Spawn(new Vector3(1.4f, 1.3f, 5.5f), new Vector3(1.0f, 0.6f, 1.4f), new Color(0.92f, 0.32f, 0.5f));
             flutter2.transform.SetParent(parent, false);
+            var flutter3 = Butterfly.Spawn(new Vector3(-2.3f, 0.9f, 7.0f), new Vector3(1.3f, 0.6f, 1.2f), new Color(0.55f, 0.75f, 0.95f));
+            flutter3.transform.SetParent(parent, false);
+            var flutter4 = Butterfly.Spawn(new Vector3(2.6f, 1.5f, 4.2f), new Vector3(1.1f, 0.7f, 1.3f), new Color(1f, 0.85f, 0.35f));
+            flutter4.transform.SetParent(parent, false);
         }
 
         // ---- Sunny-park sky decor: a warm sun disc, drifting cloud clusters, roadside trees,
@@ -368,6 +380,10 @@ namespace Kinex.AstroStance.EditorTools
                 new Vector4(-6f, 26f, 120f, 9f),
                 new Vector4(28f, 17f, 88f, 6f),
                 new Vector4(3f, 21f, 132f, 10f),
+                new Vector4(-38f, 30f, 150f, 12f),
+                new Vector4(40f, 28f, 160f, 11f),
+                new Vector4(-14f, 15f, 74f, 5f),
+                new Vector4(22f, 32f, 178f, 13f),
             };
             foreach (var p in pts)
             {
@@ -427,27 +443,197 @@ namespace Kinex.AstroStance.EditorTools
             }
         }
 
-        // Roadside trees framing both sides of the lanes, receding into the distance. Index-based
-        // (not Random) jitter keeps the build deterministic; each gets a GentleSway breeze.
+        // Roadside trees framing both sides of the lanes, receding into the distance. TWO staggered
+        // rows per side — an inner row hugging the lanes and an outer row set further back — so the
+        // avenue reads as a deep tree-lined path, not a sparse dotting. Index-based (not Random)
+        // jitter keeps the build deterministic; each gets a GentleSway breeze.
         static void BuildSideScenery(Transform parent)
         {
-            float[] zs = { 1.5f, 5f, 9f, 14f, 20f };
-            float[] xs = { -3.7f, 3.7f };
+            float[] zs = { 0.5f, 3f, 6f, 9.5f, 14f, 19f, 26f, 34f };
+            // (base x, sway jitter). |x|>5 = outer row → nudged deeper so it sits behind the inner one.
+            // THREE rows per side now (inner ±3.6, mid ±6.3, outer ±9.4) for a deep tree-lined avenue.
+            (float x, float jitter)[] rows =
+            {
+                (-3.6f, -0.5f), (3.6f, 0.6f), (-6.3f, 0.3f), (6.3f, -0.4f), (-9.4f, 0.4f), (9.4f, -0.5f),
+            };
             int i = 0;
             foreach (var z in zs)
-                foreach (var x in xs)
+                foreach (var row in rows)
                 {
+                    float zz = z + (Mathf.Abs(row.x) > 5f ? 1.4f : 0f);
                     var tree = PropMeshes.Tree();
                     tree.name = "Tree";
                     tree.transform.SetParent(parent, false);
-                    float scale = 1.0f + (i % 3) * 0.2f + z * 0.03f;
+                    float scale = 1.0f + (i % 3) * 0.2f + zz * 0.03f;
                     tree.transform.localScale = Vector3.one * scale;
-                    tree.transform.localPosition = new Vector3(x + ((i % 2 == 0) ? -0.5f : 0.6f), 0f, z);
+                    tree.transform.localPosition = new Vector3(row.x + row.jitter * ((i % 2 == 0) ? 0.3f : -0.3f), 0f, zz);
                     tree.transform.localRotation = Quaternion.Euler(0f, i * 47f, 0f);
                     foreach (var r in tree.GetComponentsInChildren<Renderer>()) NoShadowR(r);
                     tree.AddComponent<GentleSway>().amplitudeDeg = 1.6f;
                     i++;
                 }
+        }
+
+        // A dense tree band filling the mid-distance between the roadside rows and the hills, so the
+        // horizon reads as woodland rather than bare grass. Bigger trees (they're far, and fog shrinks
+        // them) on a deterministic jittered grid, skipping the central lane corridor. No sway (too far
+        // to notice — saves the Update cost of ~48 extra components).
+        static void BuildBackgroundForest(Transform parent)
+        {
+            int i = 0;
+            for (int zi = 0; zi < 6; zi++)
+            {
+                float z = 32f + zi * 6.5f;
+                for (int xi = -5; xi <= 5; xi++)
+                {
+                    if (Mathf.Abs(xi) < 2) continue; // keep the lane corridor clear
+                    var tree = PropMeshes.Tree();
+                    tree.name = "BgTree";
+                    tree.transform.SetParent(parent, false);
+                    float scale = 1.8f + (i % 4) * 0.5f + zi * 0.25f;
+                    tree.transform.localScale = Vector3.one * scale;
+                    float x = xi * 4.6f + ((i % 3) - 1) * 1.3f;
+                    tree.transform.localPosition = new Vector3(x, 0f, z + (i % 2) * 2f);
+                    tree.transform.localRotation = Quaternion.Euler(0f, i * 53f, 0f);
+                    foreach (var r in tree.GetComponentsInChildren<Renderer>()) NoShadowR(r);
+                    i++;
+                }
+            }
+        }
+
+        // A TALL blue-grey mountain range behind the green hills — layered depth (meadow → hills →
+        // mountains → sky). Squashed spheres, sunk so a big rounded peak pokes up; kept inside the
+        // sky-dome radius (350) so the opaque dome can't clip them, and partly inside the fog so the
+        // distance still softens them. Two tones = a nearer darker range + a paler back range.
+        static void BuildFarMountains(Transform parent)
+        {
+            var near = PropMeshes.MatUnlit(new Color(0.48f, 0.58f, 0.70f));  // front range (darker)
+            var back = PropMeshes.MatUnlit(new Color(0.58f, 0.67f, 0.79f));  // back range (paler, hazier)
+            // x, z, width, height, isBackRange
+            (float x, float z, float w, float h, bool back)[] peaks =
+            {
+                (-150f, 150f, 240f, 150f, false), (-45f, 165f, 280f, 190f, false), (95f, 152f, 220f, 140f, false),
+                (200f, 172f, 260f, 175f, false),  (-255f, 158f, 250f, 160f, false), (-95f, 138f, 200f, 128f, false),
+                (150f, 145f, 210f, 138f, false),
+                (60f, 195f, 320f, 205f, true),    (-180f, 200f, 300f, 200f, true),  (25f, 210f, 300f, 210f, true),
+                (255f, 205f, 280f, 195f, true),
+            };
+            foreach (var p in peaks)
+            {
+                var m = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                m.name = "Mountain";
+                DestroyColliderSafe(m);
+                m.transform.SetParent(parent, false);
+                m.transform.localPosition = new Vector3(p.x, -p.h * 0.30f, p.z);
+                m.transform.localScale = new Vector3(p.w, p.h, p.w * 0.55f);
+                m.GetComponent<Renderer>().sharedMaterial = p.back ? back : near;
+                NoShadow(m);
+            }
+        }
+
+        // Low rounded shrubs clustered along the grass verges (between and behind the trees) so the
+        // ground isn't an empty green sheet. Two-tone green, index-jittered clumps of squashed spheres.
+        static void BuildBushes(Transform parent)
+        {
+            var bushA = PropMeshes.MatUnlit(new Color(0.24f, 0.44f, 0.20f));
+            var bushB = PropMeshes.MatUnlit(new Color(0.31f, 0.53f, 0.27f));
+            (float x, float z, float s)[] bushes =
+            {
+                (-2.6f, 0.6f, 0.8f),  (2.7f, 1.3f, 0.9f),  (-3.2f, 3.1f, 1.0f),  (3.3f, 4.4f, 0.85f),
+                (-2.4f, 6.2f, 0.7f),  (2.5f, 7.6f, 0.95f), (-4.7f, 2.2f, 1.2f),  (4.8f, 5.2f, 1.1f),
+                (-5.5f, 8.4f, 1.3f),  (5.3f, 10.5f, 1.25f),(-2.9f, 10.8f, 0.9f), (3.0f, 12.5f, 1.0f),
+            };
+            for (int i = 0; i < bushes.Length; i++)
+            {
+                var b = bushes[i];
+                var bush = new GameObject("Bush");
+                bush.transform.SetParent(parent, false);
+                bush.transform.localPosition = new Vector3(b.x, 0f, b.z);
+                var mat = (i % 2 == 0) ? bushA : bushB;
+                AddBushLobe(bush.transform, new Vector3(0f, b.s * 0.35f, 0f), b.s, mat);
+                AddBushLobe(bush.transform, new Vector3(b.s * 0.4f, b.s * 0.28f, 0.1f), b.s * 0.7f, mat);
+                AddBushLobe(bush.transform, new Vector3(-b.s * 0.42f, b.s * 0.3f, -0.1f), b.s * 0.65f, mat);
+            }
+        }
+
+        static void AddBushLobe(Transform parent, Vector3 pos, float size, Material mat)
+        {
+            var lobe = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            lobe.name = "Lobe";
+            DestroyColliderSafe(lobe);
+            lobe.transform.SetParent(parent, false);
+            lobe.transform.localPosition = pos;
+            lobe.transform.localScale = new Vector3(size, size * 0.8f, size);
+            lobe.GetComponent<Renderer>().sharedMaterial = mat;
+            NoShadow(lobe);
+        }
+
+        // Small coloured flower dots scattered on the grass verges either side of the lanes — cheap
+        // spots of colour that make the meadow feel tended. One tiny sphere each (a stem would double
+        // the object count for no gain at this camera distance), skipping the |x|<1.9 play area.
+        static void BuildFlowerBeds(Transform parent)
+        {
+            var petalMats = new[]
+            {
+                PropMeshes.MatUnlit(new Color(0.96f, 0.85f, 0.30f)), // yellow
+                PropMeshes.MatUnlit(new Color(0.92f, 0.36f, 0.46f)), // pink
+                PropMeshes.MatUnlit(new Color(0.80f, 0.55f, 0.92f)), // lilac
+                PropMeshes.MatUnlit(new Color(0.97f, 0.56f, 0.24f)), // orange
+                PropMeshes.MatUnlit(new Color(0.97f, 0.97f, 0.99f)), // white
+            };
+            int idx = 0;
+            for (int side = -1; side <= 1; side += 2)
+                for (int zi = 0; zi < 9; zi++)
+                    for (int xi = 0; xi < 3; xi++)
+                    {
+                        float x = side * (2.0f + xi * 0.75f + (zi % 2) * 0.3f);
+                        float z = 0.4f + zi * 1.25f;
+                        var flower = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                        flower.name = "Flower";
+                        DestroyColliderSafe(flower);
+                        flower.transform.SetParent(parent, false);
+                        flower.transform.localPosition = new Vector3(x, 0.12f, z);
+                        flower.transform.localScale = Vector3.one * (0.12f + (idx % 3) * 0.02f);
+                        flower.GetComponent<Renderer>().sharedMaterial = petalMats[idx % petalMats.Length];
+                        NoShadow(flower);
+                        idx++;
+                    }
+        }
+
+        // A few bird silhouettes gliding across the sky — two angled dark wings each, drifting on the
+        // same CloudDrift used for clouds. High and far so they never cross the play field.
+        static void BuildBirds(Transform parent)
+        {
+            var birdMat = PropMeshes.MatUnlit(new Color(0.24f, 0.26f, 0.32f));
+            (float x, float y, float z, float s, float speed)[] birds =
+            {
+                (-18f, 16f, 70f, 1.4f, 0.9f), (6f, 21f, 90f, 1.1f, 0.7f),
+                (22f, 14f, 62f, 1.2f, 1.1f),  (-9f, 24f, 118f, 1.6f, 0.55f),
+            };
+            foreach (var b in birds)
+            {
+                var bird = new GameObject("Bird");
+                bird.transform.SetParent(parent, false);
+                bird.transform.localPosition = new Vector3(b.x, b.y, b.z);
+                AddWing(bird.transform, 1f, b.s, birdMat);
+                AddWing(bird.transform, -1f, b.s, birdMat);
+                var drift = bird.AddComponent<CloudDrift>();
+                drift.speed = b.speed;
+                drift.range = 44f;
+            }
+        }
+
+        static void AddWing(Transform parent, float side, float size, Material mat)
+        {
+            var wing = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            wing.name = "Wing";
+            DestroyColliderSafe(wing);
+            wing.transform.SetParent(parent, false);
+            wing.transform.localPosition = new Vector3(side * size * 0.45f, 0f, 0f);
+            wing.transform.localRotation = Quaternion.Euler(0f, 0f, side * 22f); // shallow V
+            wing.transform.localScale = new Vector3(size, size * 0.12f, size * 0.03f);
+            wing.GetComponent<Renderer>().sharedMaterial = mat;
+            NoShadow(wing);
         }
 
         // Gentle warm pollen motes drifting low over the grass — the sunlit-park counterpart to the
@@ -645,6 +831,9 @@ namespace Kinex.AstroStance.EditorTools
             so.FindProperty("autoCalibrate").boolValue = false;
             so.FindProperty("useOneEuroSmoothing").boolValue = true;
             // Back-view scene: the avatar "follows" the player's own side instead of mirroring.
+            // This is only the EDITOR-TIME default — AstroStanceDirector.Awake() overrides it at
+            // runtime from its invertLateralForBackView master flag (keeps the avatar's limb
+            // mapping in agreement with the lane/kick-side laterality fix; see that flag's tooltip).
             so.FindProperty("sameSideRetarget").boolValue = true;
             // Back view: keep the upper spine steady (head/ear drive folds the torso, looks wrong).
             so.FindProperty("steadyUpperSpine").boolValue = true;
