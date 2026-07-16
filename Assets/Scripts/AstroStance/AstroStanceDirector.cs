@@ -109,6 +109,11 @@ namespace Kinex.AstroStance
         public TMP_Text toastText;
         [Tooltip("Optional pill behind the toast text. Fades in/out with the message — leave null for text-only.")]
         public Image toastBg;
+        [Tooltip("Floating score-change card (scorechange.png) — popped in briefly by ShowScorePop " +
+                 "whenever the score changes. Hidden by default; assigned by the UI builder.")]
+        public Image scoreChangePopup;
+        [Tooltip("The +1 / −1 number inside scoreChangePopup.")]
+        public TMP_Text scoreChangeText;
         [Tooltip("3 lane indicator dots, left→right.")]
         public Image[] laneDots = new Image[3];
         public TMP_Text countdownText;
@@ -162,6 +167,7 @@ namespace Kinex.AstroStance
         float _countdownLeft;
         float _timeLeft;
         float _toastTimer;
+        Coroutine _scoreChangeRoutine;
         float _avatarBaseX;
         float _avatarBaseY;
         float _sitDip01;   // 0 = standing, 1 = fully dipped into the sit crouch (smoothed)
@@ -558,6 +564,7 @@ namespace Kinex.AstroStance
                     _result.treasures++;
                     _result.score++;
                     UpdateScoreText();
+                    ShowScorePop(+1);
                     ShowToast("+1 เก็บสมบัติ!", ToastGold);
                     Kinex.Sfx.Play("coin", 0.8f);
                 }
@@ -659,6 +666,7 @@ namespace Kinex.AstroStance
                 _result.kicks++;
                 _result.score++;
                 UpdateScoreText();
+                ShowScorePop(+1);
                 ShowToast("เตะโดน! +1", ToastCyan);
                 Kinex.Sfx.Play("whoosh", 0.7f);
             }
@@ -675,6 +683,7 @@ namespace Kinex.AstroStance
                         _result.meteorHits++;
                         _result.score--;
                         UpdateScoreText();
+                        ShowScorePop(-1);
                         ShowToast("−1 โดนก้อนหิน!", ToastOrange);
                         Kinex.Sfx.Play("hit_1", 0.8f);
                         if (shakeTarget != null) StartCoroutine(ShakeRoutine());
@@ -696,6 +705,7 @@ namespace Kinex.AstroStance
                         _result.kickFouls++;
                         _result.score--;
                         UpdateScoreText();
+                        ShowScorePop(-1);
                         ShowToast("−1 ยืนทับวงเตะ! ขยับไปเลนข้าง ๆ", ToastOrange);
                         Kinex.Sfx.Play("hit_2", 0.6f);
                         item.FadeAway();
@@ -858,6 +868,73 @@ namespace Kinex.AstroStance
             var c = toastBg.color;
             c.a = a;
             toastBg.color = c;
+        }
+
+        // Small floating "+1"/"−1" card (scorechange.png) — separate from ShowToast's text message,
+        // this is the numeric badge. Pops in, holds, fades out (~0.8s total). Re-triggering while
+        // one is already showing kills the old animation and restarts clean rather than stacking.
+        void ShowScorePop(int delta)
+        {
+            if (scoreChangePopup == null || scoreChangeText == null) return;
+            if (_scoreChangeRoutine != null) StopCoroutine(_scoreChangeRoutine);
+
+            scoreChangeText.text = (delta > 0 ? "+" : "−") + Mathf.Abs(delta);
+            var tint = delta > 0 ? ToastGold : ToastOrange;
+            scoreChangeText.color = tint;
+            SetScorePopAlpha(1f);
+            scoreChangePopup.gameObject.SetActive(true);
+            _scoreChangeRoutine = StartCoroutine(ScoreChangePopRoutine());
+        }
+
+        void SetScorePopAlpha(float a)
+        {
+            if (scoreChangePopup != null)
+            {
+                var c = scoreChangePopup.color;
+                c.a = a;
+                scoreChangePopup.color = c;
+            }
+            if (scoreChangeText != null)
+            {
+                var c = scoreChangeText.color;
+                c.a = a;
+                scoreChangeText.color = c;
+            }
+        }
+
+        System.Collections.IEnumerator ScoreChangePopRoutine()
+        {
+            var t = scoreChangePopup.transform;
+            const float popTime = 0.15f, settleTime = 0.08f, holdTime = 0.35f, fadeTime = 0.3f;
+
+            float time = 0f;
+            while (time < popTime)
+            {
+                time += Time.deltaTime;
+                float k = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(time / popTime));
+                t.localScale = Vector3.LerpUnclamped(Vector3.one * 0.6f, Vector3.one * 1.08f, k);
+                yield return null;
+            }
+            time = 0f;
+            while (time < settleTime)
+            {
+                time += Time.deltaTime;
+                t.localScale = Vector3.Lerp(Vector3.one * 1.08f, Vector3.one, Mathf.Clamp01(time / settleTime));
+                yield return null;
+            }
+            t.localScale = Vector3.one;
+
+            yield return new WaitForSeconds(holdTime);
+
+            time = 0f;
+            while (time < fadeTime)
+            {
+                time += Time.deltaTime;
+                SetScorePopAlpha(1f - Mathf.Clamp01(time / fadeTime));
+                yield return null;
+            }
+            scoreChangePopup.gameObject.SetActive(false);
+            _scoreChangeRoutine = null;
         }
 
         void ShowOnly(GameObject panel)

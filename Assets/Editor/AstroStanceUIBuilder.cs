@@ -223,10 +223,14 @@ namespace Kinex.AstroStance.EditorTools
             const float chipSize = 64f, chipGap = 24f;
             float chipsTotalW = chipLabels.Length * chipSize + (chipLabels.Length - 1) * chipGap;
             float chipStartX = (FW - chipsTotalW) * 0.5f;
+            // dot_on.png (same rounded shape already used for the lane dots) instead of the raw
+            // engine knob — a plain color rect where a real sprite exists (Task 4 consistency pass).
+            var chipDotSprite = Ui("dot_on");
             for (int i = 0; i < chipLabels.Length; i++)
             {
                 float cx = chipStartX + i * (chipSize + chipGap);
-                var chip = AddImage(framing.transform, $"FramingChip{i}", knob, new Color(1f, 1f, 1f, 0.25f));
+                var chip = AddImage(framing.transform, $"FramingChip{i}",
+                    chipDotSprite != null ? chipDotSprite : knob, new Color(1f, 1f, 1f, 0.25f));
                 Place(chip.rectTransform, cx, 540, chipSize, chipSize);
                 var chipLabel = AddText(framing.transform, chipLabels[i], thaiSemi, 30, DarkText, TextAlignmentOptions.Center);
                 Place(chipLabel.rectTransform, cx - 13, 608, chipSize + 26, 40);
@@ -258,6 +262,10 @@ namespace Kinex.AstroStance.EditorTools
             // =================== CALIBRATION (canvas-level sibling — see class doc) ===================
             var calibGroup = NewPanel(canvas.transform, "CalibGroup");
             calibGroup.GetComponent<Image>().color = ScrimDim;
+            // Cream card behind the ring+prompt (Task 4 consistency pass) — every other panel's
+            // guidance text sits on a card_cream now; CalibGroup was the one holdout floating
+            // straight on the dark scrim. calibText below switches to dark ink to match.
+            AddCard(calibGroup.transform, 140, 460, 647, 390);
             var calibTrack = AddImage(calibGroup.transform, "CalibRingTrack",
                 ringTrackSprite != null ? ringTrackSprite : knob, ringTrackSprite != null ? Color.white : RingTrack);
             Place(calibTrack.rectTransform, 383, 560, 160, 160);
@@ -269,26 +277,50 @@ namespace Kinex.AstroStance.EditorTools
             calibRing.fillClockwise = true;
             calibRing.fillAmount = 0f;
             Place(calibRing.rectTransform, 383, 560, 160, 160);
-            // CalibGroup has no card behind it — it sits directly on the dark ScrimDim overlay,
-            // so this stays white (not dark ink) for contrast.
-            var calibText = AddText(calibGroup.transform, "ยืนตรง นิ่ง ๆ 2 วินาที", thaiSemi, 48, Color.white, TextAlignmentOptions.Center);
+            // Now sits on the cream card above, so dark ink (like every other card's guidance
+            // text) instead of the old white-on-scrim treatment.
+            var calibText = AddText(calibGroup.transform, "ยืนตรง นิ่ง ๆ 2 วินาที", thaiSemi, 48, DarkText, TextAlignmentOptions.Center);
             Place(calibText.rectTransform, 114, 740, 700, 70);
 
             // =================== HUD ===================
             var hud = NewPanel(canvas.transform, "HudPanel");
 
-            // -- Score, top-left. --
-            AddChip(hud.transform, 36, 36, 240, 110);
-            var scoreStar = AddImage(hud.transform, "ScoreStar", knob, Gold);
-            Place(scoreStar.rectTransform, 56, 58, 56, 56);
-            var scoreText = AddText(hud.transform, "0", montserratBlack, 64, OffWhite, TextAlignmentOptions.Left);
-            Place(scoreText.rectTransform, 122, 52, 140, 82);
+            // -- Score, top-left. scorebadge.png bakes its own gold star into the LEFT side (source
+            // art is 623x400, ~1.56:1) — the numeric score just sits in the empty space to the
+            // RIGHT of that baked star, inside the same footprint the old chip+star combo used.
+            // Sized to the ~240x110 HUD slot per spec (a mild stretch off the source aspect — an
+            // acceptable trade to keep the score's on-screen position/footprint unchanged). Falls
+            // back to the original procedural chip + tinted knob star if the art isn't built yet.
+            var scoreBadgeSprite = Ui("scorebadge");
+            TMP_Text scoreText;
+            if (scoreBadgeSprite != null)
+            {
+                var scoreBadge = AddImage(hud.transform, "ScoreBadge", scoreBadgeSprite, Color.white);
+                Place(scoreBadge.rectTransform, 36, 36, 240, 110);
+                scoreText = AddText(hud.transform, "0", montserratBlack, 58, OffWhite, TextAlignmentOptions.Left);
+                Place(scoreText.rectTransform, 132, 46, 130, 82);
+            }
+            else
+            {
+                AddChip(hud.transform, 36, 36, 240, 110);
+                var scoreStar = AddImage(hud.transform, "ScoreStar", knob, Gold);
+                Place(scoreStar.rectTransform, 56, 58, 56, 56);
+                scoreText = AddText(hud.transform, "0", montserratBlack, 64, OffWhite, TextAlignmentOptions.Left);
+                Place(scoreText.rectTransform, 122, 52, 140, 82);
+            }
 
-            // -- Timer, top-center. --
-            AddChip(hud.transform, 343, 36, 240, 110);
+            // -- Timer, top-center. Clean circular ring (no square chip behind it) with mm:ss
+            // centered inside — matches the timeuireference.png reference. Same ring_track/
+            // ring_fill sprites as CalibRing/FramingHoldRing, just sized+placed to read as a
+            // tidy stopwatch instead of the old chip-backed square.
+            const float timerRingSize = 132f;
+            const float timerColCenterX = 463f; // center of the old 343..583 chip span
+            const float timerColCenterY = 91f;  // center of the old 36..146 chip span
+            float timerRingX = timerColCenterX - timerRingSize * 0.5f;
+            float timerRingY = timerColCenterY - timerRingSize * 0.5f;
             var timerRingTrack = AddImage(hud.transform, "TimerRingTrack",
                 ringTrackSprite != null ? ringTrackSprite : knob, ringTrackSprite != null ? Color.white : RingTrack);
-            Place(timerRingTrack.rectTransform, 403, 46, 90, 90);
+            Place(timerRingTrack.rectTransform, timerRingX, timerRingY, timerRingSize, timerRingSize);
             var timerRing = AddImage(hud.transform, "TimerRingFill",
                 ringFillSprite != null ? ringFillSprite : knob, ringFillSprite != null ? Color.white : Cyan);
             timerRing.type = Image.Type.Filled;
@@ -296,10 +328,31 @@ namespace Kinex.AstroStance.EditorTools
             timerRing.fillOrigin = (int)Image.Origin360.Top;
             timerRing.fillClockwise = false; // counts DOWN
             timerRing.fillAmount = 1f;
-            Place(timerRing.rectTransform, 403, 46, 90, 90);
-            var timerText = AddText(hud.transform, "3:00", thaiSemi, 56, OffWhite, TextAlignmentOptions.Center);
-            Place(timerText.rectTransform, 343, 52, 240, 82);
+            Place(timerRing.rectTransform, timerRingX, timerRingY, timerRingSize, timerRingSize);
+            var timerText = AddText(hud.transform, "3:00", thaiSemi, 38, OffWhite, TextAlignmentOptions.Center);
+            Place(timerText.rectTransform, timerRingX, timerColCenterY - 30f, timerRingSize, 60f);
             Outline(timerText, new Color(0f, 0f, 0f, 0.6f), 0.2f);
+
+            // -- Score-change popup: floats just under the score badge. Hidden by default — the
+            // director activates + animates it (ShowScorePop) whenever the score changes. Plain
+            // (non-sliced) scorechange.png bakes its own gold star top-center (source 488x511,
+            // ~0.96:1); the +1/-1 number goes in the card body BELOW that baked star.
+            var scoreChangeSprite = Ui("scorechange");
+            const float scPopW = 180f, scPopH = 190f;
+            var scoreChangePopup = AddImage(hud.transform, "ScoreChangePopup",
+                scoreChangeSprite != null ? scoreChangeSprite : knob, scoreChangeSprite != null ? Color.white : GlassBg);
+            if (scoreChangeSprite == null) Round(scoreChangePopup);
+            Place(scoreChangePopup.rectTransform, 36, 160, scPopW, scPopH);
+            var scoreChangeText = AddText(scoreChangePopup.transform, "+1", montserratBlack, 58, OffWhite, TextAlignmentOptions.Center);
+            scoreChangeText.fontStyle = FontStyles.Bold;
+            // Parent-relative stretch (NOT Place — Place's math assumes a canvas-sized parent):
+            // fills the popup's lower body, below the baked star which sits in the top ~40%.
+            var scText = scoreChangeText.rectTransform;
+            scText.anchorMin = Vector2.zero;
+            scText.anchorMax = Vector2.one;
+            scText.offsetMin = new Vector2(12f, 16f);
+            scText.offsetMax = new Vector2(-12f, -78f);
+            scoreChangePopup.gameObject.SetActive(false);
 
             // -- Pause round button, top-right. --
             var btnRoundSprite = Ui("btn_round");
@@ -483,6 +536,8 @@ namespace Kinex.AstroStance.EditorTools
             Assign(so, "timerRing", timerRing);
             Assign(so, "toastText", toastText);
             Assign(so, "toastBg", toastBg);
+            Assign(so, "scoreChangePopup", scoreChangePopup);
+            Assign(so, "scoreChangeText", scoreChangeText);
             Assign(so, "countdownText", countdownText);
             Assign(so, "resultScoreText", resultScoreText);
             Assign(so, "bodyLostIgnoreButton", bodyLostIgnoreBtn);
@@ -756,7 +811,10 @@ namespace Kinex.AstroStance.EditorTools
                     btn.spriteState = state;
                 }
             }
-            var text = AddText(img.transform, label, font, labelSize, textColor, TextAlignmentOptions.Center);
+            // Secondary buttons use the pale btn_secondary sprite — white text on it is nearly
+            // invisible (see pause/results screenshots), so force a dark readable label regardless
+            // of what the caller passed.
+            var text = AddText(img.transform, label, font, labelSize, secondary ? DarkText : textColor, TextAlignmentOptions.Center);
             text.fontStyle = FontStyles.Bold;
             Stretch(text.rectTransform);
             return btn;

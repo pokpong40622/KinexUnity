@@ -27,6 +27,9 @@
     { "file": "sidewalkcard.png", "border": [0, 0, 0, 0] },
     { "file": "sitcard.png", "border": [0, 0, 0, 0] },
     { "file": "kickcard.png", "border": [0, 0, 0, 0] },
-    { "file": "startbutton.png", "border": [0, 0, 0, 0] }
+    { "file": "startbutton.png", "border": [0, 0, 0, 0] },
+
+    { "file": "scorebadge.png", "border": [0, 0, 0, 0] },
+    { "file": "scorechange.png", "border": [0, 0, 0, 0] }
   ]
 }

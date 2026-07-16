@@ -69,10 +69,10 @@ namespace Kinex.AstroStance.EditorTools
             // plain pitch-only camera behind it at -Z already looks over its shoulder. ----
             var camGo = new GameObject("Main Camera");
             camGo.tag = "MainCamera";
-            camGo.transform.position = new Vector3(0f, 2.05f, -3.4f);
+            camGo.transform.position = new Vector3(0f, 2.2f, -4.1f);
             camGo.transform.rotation = Quaternion.Euler(10f, 0f, 0f);
             var cam = camGo.AddComponent<Camera>();
-            cam.fieldOfView = 50f;
+            cam.fieldOfView = 54f;
             cam.nearClipPlane = 0.1f;
             cam.farClipPlane = 300f;
             cam.clearFlags = CameraClearFlags.SolidColor;
