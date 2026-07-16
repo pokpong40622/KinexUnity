@@ -54,6 +54,9 @@ namespace Kinex.App
                 case "thedasher":
                     SceneManager.LoadScene("TheDasherScene");
                     break;
+                case "hangglider":
+                    SceneManager.LoadScene("HangGliderScene");
+                    break;
                 default:
                     Debug.LogWarning($"[SceneRouter] Unknown game id: '{gameId}'");
                     break;

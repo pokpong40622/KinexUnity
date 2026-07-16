@@ -3,6 +3,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 using Kinex.Motion;
+using Kinex.FX;
 
 namespace Kinex.TheDasher
 {
@@ -722,6 +723,13 @@ namespace Kinex.TheDasher
                         ShowFeedback(feedbackDanger); // picture popup "ระวัง!" (the −1 shows via ShowScorePop)
                         Kinex.Sfx.Play("hit_1", 0.8f);
                         if (shakeTarget != null) StartCoroutine(ShakeRoutine());
+                        // Contact feedback: debris burst at the player + a red damage flash.
+                        if (avatarRoot != null)
+                        {
+                            KinexFx.PopBurst(avatarRoot.position + Vector3.up * 1.0f, new Color(1f, 0.30f, 0.22f), 28);
+                            KinexFx.PopBurst(avatarRoot.position + Vector3.up * 0.6f, new Color(0.35f, 0.35f, 0.4f), 16);
+                        }
+                        StartCoroutine(DamageFlash());
                     }
                     else
                     {
@@ -756,6 +764,50 @@ namespace Kinex.TheDasher
             // Active at once in different lanes (beat 6.2s < fall 4s + window 7s), and a treasure
             // leaving a lane you're NOT working shouldn't knock the tool out of your hand.
             if (item.Kind == DasherKind.Treasure && _tool != null && item.Lane == PlayerLane) DropTool();
+        }
+
+        // Cached runtime Vignette from the global post-processing volume, pulsed red on a hit.
+        UnityEngine.Rendering.Universal.Vignette _dmgVig;
+        float _vigBaseIntensity;
+        Color _vigBaseColor;
+        bool _dmgVigResolved;
+
+        // Brief red vignette pulse when a meteor hits the player — a screen-space "damage" cue
+        // that reads clearly even in peripheral vision. Uses the volume's runtime profile copy,
+        // so the TheDasherPost asset on disk is never modified.
+        System.Collections.IEnumerator DamageFlash()
+        {
+            if (!_dmgVigResolved)
+            {
+                _dmgVigResolved = true;
+                var vols = UnityEngine.Object.FindObjectsByType<UnityEngine.Rendering.Volume>(UnityEngine.FindObjectsSortMode.None);
+                foreach (var v in vols)
+                {
+                    if (v.isGlobal && v.profile != null &&
+                        v.profile.TryGet(out UnityEngine.Rendering.Universal.Vignette vig))
+                    {
+                        _dmgVig = vig;
+                        _vigBaseIntensity = vig.intensity.value;
+                        _vigBaseColor = vig.color.value;
+                        break;
+                    }
+                }
+            }
+            if (_dmgVig == null) yield break;
+
+            var damageColor = new Color(0.75f, 0.05f, 0.05f);
+            const float dur = 0.45f;
+            float t = 0f;
+            while (t < dur)
+            {
+                t += Time.deltaTime;
+                float k = 1f - (t / dur); // 1 → 0
+                _dmgVig.intensity.value = Mathf.Lerp(_vigBaseIntensity, 0.5f, k);
+                _dmgVig.color.value = Color.Lerp(_vigBaseColor, damageColor, k);
+                yield return null;
+            }
+            _dmgVig.intensity.value = _vigBaseIntensity;
+            _dmgVig.color.value = _vigBaseColor;
         }
 
         System.Collections.IEnumerator ShakeRoutine()
