@@ -31,8 +31,10 @@ using Mediapipe.Tasks.Vision.PoseLandmarker;
 public class MediaPipePoseDetector : MonoBehaviour
 {
     [Header("Model")]
-    [Tooltip("pose_landmarker_full.task placed under Assets/StreamingAssets/ (filename only).")]
-    [SerializeField] string modelFileName = "pose_landmarker_full.bytes";
+    [Tooltip("MediaPipe model file placed under Assets/StreamingAssets/ (filename only). " +
+             "'_lite' is markedly faster than '_full' for the gross-motor tracking these rehab " +
+             "games need — prefer it unless a specific scene needs '_full's extra accuracy.")]
+    [SerializeField] string modelFileName = "pose_landmarker_lite.bytes";
 
     [Header("Settings")]
     [Tooltip("Mirrors the React project's minPoseDetectionConfidence (0.5).")]
@@ -101,12 +103,12 @@ public class MediaPipePoseDetector : MonoBehaviour
              "flipY = up/down. Defaults match the validated webcam setup.")]
     [SerializeField] bool flipX = false;  // cross-side arm/leg mapping already corrects laterality; flipX=true was double-mirroring
     [Tooltip("Swap the cross-side (mirror) limb mapping to SAME-side. For scenes that show the " +
-             "avatar from BEHIND (AstroStance): viewed from the back, mirror semantics become " +
+             "avatar from BEHIND (TheDasher): viewed from the back, mirror semantics become " +
              "'follow me', so the player's right limb must drive the avatar's right limb. " +
              "Default OFF — front-facing scenes are unchanged.")]
     [SerializeField] bool sameSideRetarget = false;
     // Settable (not just gettable) so a scene's director can push the correct value at runtime —
-    // AstroStance does this in Awake() to keep its master lateral-mirror flag (one Inspector bool)
+    // TheDasher does this in Awake() to keep its master lateral-mirror flag (one Inspector bool)
     // in agreement with the lane/kick-side logic that reads the same raw landmarks. Purely a plain
     // field toggle: it only affects THIS detector instance, so other scenes/games are unaffected
     // unless they also choose to call the setter.
@@ -132,7 +134,7 @@ public class MediaPipePoseDetector : MonoBehaviour
     [SerializeField] bool armsOnly = false;
     [Tooltip("Keep the CHEST + NECK at their rest pose instead of driving them from the head/ear " +
              "landmarks. The shoulder→ear vector is short and noisy, so it can over-rotate the upper " +
-             "torso into a forward fold — very visible in a back-view game. ON for AstroStance; OFF " +
+             "torso into a forward fold — very visible in a back-view game. ON for TheDasher; OFF " +
              "keeps the head/neck follow for front-facing games.")]
     [SerializeField] bool steadyUpperSpine = false;
     [Tooltip("Drive the avatar from MediaPipe 3D WORLD landmarks (metric, hip-centered — BlazePose " +
@@ -226,7 +228,7 @@ public class MediaPipePoseDetector : MonoBehaviour
     public Animator AvatarAnimator => _animator;
 
     /// <summary>Turn the live pose puppet on/off. A game can disable it to pose the avatar itself
-    /// (e.g. AstroStance plays a scripted sit crouch during the sit rep) and re-enable it after.</summary>
+    /// (e.g. TheDasher plays a scripted sit crouch during the sit rep) and re-enable it after.</summary>
     public bool AvatarDriving { get => drivesAvatar; set => drivesAvatar = value; }
 
     // ---- Preview cover-crop, computed at runtime from the real webcam aspect so the
@@ -284,7 +286,7 @@ public class MediaPipePoseDetector : MonoBehaviour
     bool UsingVideo => _videoPlayer != null;
     // EDITOR TEST ONLY: when true, Update() skips all live capture and the avatar is driven purely
     // from InjectRecordedFrame() (a saved .json landmark recording). Used to replay the recorded
-    // pose clips without a camera or a decodable video (see AstroTestClipSwitcher).
+    // pose clips without a camera or a decodable video (see DasherTestClipSwitcher).
     bool _replayActive;
     // The live webcam feeds MediaPipe a BOTTOM-UP frame (flipY default is tuned for that); a test
     // VIDEO clip feeds an UPRIGHT frame, so the avatar's vertical convention must be inverted for
@@ -294,6 +296,9 @@ public class MediaPipePoseDetector : MonoBehaviour
     int SrcWidth  => UsingVideo ? _videoRT.width  : _webcam.width;
     int SrcHeight => UsingVideo ? _videoRT.height : _webcam.height;
     Texture2D _frame;                       // CPU copy fed to MediaPipe each tick
+    Color32[] _rawBuffer;                   // reused GetPixels32 destination — was allocated fresh every frame
+    Color32[] _rotateBuffer;                // reused RotateFlip destination — was allocated fresh every frame
+    int _inferenceSkipCounter;              // throttles inference — see Update()'s InferenceThrottle
     Animator _animator;
     UnityEngine.UI.RawImage _rawImage;      // camera preview in the game UI
     bool _previewReady;
@@ -373,7 +378,7 @@ public class MediaPipePoseDetector : MonoBehaviour
     }
 
     // TEST ONLY: (re)start the recorded-clip source, reusing the VideoPlayer/RenderTexture. Public so
-    // AstroTestClipSwitcher can hot-swap clips at runtime (numpad). Stops the live webcam if running,
+    // DasherTestClipSwitcher can hot-swap clips at runtime (numpad). Stops the live webcam if running,
     // so UsingVideo becomes true from here on.
     public void SetTestClip(UnityEngine.Video.VideoClip clip)
     {
@@ -518,8 +523,11 @@ public class MediaPipePoseDetector : MonoBehaviour
     // Identity guarantee: rotCW==0 && !vFlip → returns src unchanged (same pixel order, no copy).
     //
     // Dimension swap: 90° and 270° rotations swap width and height, as documented below.
+    // `dst` is a caller-owned reusable buffer (was a fresh `new Color32[]` allocated every single
+    // frame here — on Android, rot is normally 90/270, so this ran every frame on device) —
+    // reallocated only when the required size actually changes.
     static Color32[] RotateFlip(Color32[] src, int w, int h, int rotCW, bool vFlip,
-                                out int outW, out int outH)
+                                ref Color32[] dst, out int outW, out int outH)
     {
         // Normalise rotation to 0/90/180/270.
         rotCW = ((rotCW % 360) + 360) % 360;
@@ -532,7 +540,8 @@ public class MediaPipePoseDetector : MonoBehaviour
         outW = quarter ? h : w;
         outH = quarter ? w : h;
 
-        var dst = new Color32[outW * outH];
+        int needed = outW * outH;
+        if (dst == null || dst.Length != needed) dst = new Color32[needed];
 
         // WebCamTexture pixels are bottom-up: pixel at (x, y) where y=0 is the bottom row of the
         // image lives at src[y * w + x]. We keep the same bottom-up convention in dst so the
@@ -582,12 +591,26 @@ public class MediaPipePoseDetector : MonoBehaviour
         return dst;
     }
 
+    // Runs full pose inference on 1 out of every N webcam frames the device delivers — a real
+    // MediaPipe landmarker pass is synchronous/blocking on the main thread, and this is a slow
+    // gross-motor rehab game (side-step/sit-stand/kick), not a twitch game, so halving the sample
+    // rate costs no meaningful responsiveness. Skipped frames simply keep last frame's HasPose/
+    // landmarks (this component just doesn't touch them — no separate "hold" logic needed).
+    // Video-test replay tooling is left untouched (only the live webcam path is throttled).
+    const int InferenceEveryNFrames = 2;
+
     void Update()
     {
         if (_replayActive) return; // driven by InjectRecordedFrame instead of live capture
         if (_landmarker == null) return;
         if (UsingVideo) { if (_videoPlayer == null || !_videoPlayer.isPrepared) return; }
-        else if (_webcam == null || !_webcam.didUpdateThisFrame) return;
+        else
+        {
+            if (_webcam == null || !_webcam.didUpdateThisFrame) return;
+            _inferenceSkipCounter++;
+            if (_inferenceSkipCounter < InferenceEveryNFrames) return;
+            _inferenceSkipCounter = 0;
+        }
 
         if (!_previewReady) TryApplyPreviewCrop();
 
@@ -626,9 +649,13 @@ public class MediaPipePoseDetector : MonoBehaviour
             int rot = _webcam.videoRotationAngle;   // degrees CW needed to make the image upright
             bool vMirror = _webcam.videoVerticallyMirrored;
 
-            Color32[] raw = _webcam.GetPixels32();
-            Color32[] canonical = RotateFlip(raw, srcW, srcH, rot, vMirror,
-                                             out int canW, out int canH);
+            // Reused destination buffers — GetPixels32() and RotateFlip used to each allocate a
+            // fresh Color32[] (~300 KB combined for a 640x480 feed) every single frame on device.
+            int rawNeeded = srcW * srcH;
+            if (_rawBuffer == null || _rawBuffer.Length != rawNeeded) _rawBuffer = new Color32[rawNeeded];
+            _webcam.GetPixels32(_rawBuffer);
+            Color32[] canonical = RotateFlip(_rawBuffer, srcW, srcH, rot, vMirror,
+                                             ref _rotateBuffer, out int canW, out int canH);
 
             // Log once when the webcam first delivers frames — lets on-device logcat reveal the
             // phone's actual rotation so we can verify the fix.

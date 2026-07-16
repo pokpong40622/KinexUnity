@@ -33,6 +33,19 @@ namespace Kinex.Motion
             return true;
         }
 
+        // Fixed-arity overloads for the per-frame detector hot path — the params[] overload above
+        // allocates a fresh array on every call; these let the ~7 calls/frame in DasherSitClassifier/
+        // LaneDetector/LegAbductionDetector skip that allocation entirely.
+        public static bool Valid(float[] conf, float min, int a) => conf[a] >= min;
+        public static bool Valid(float[] conf, float min, int a, int b) => conf[a] >= min && conf[b] >= min;
+        public static bool Valid(float[] conf, float min, int a, int b, int c) =>
+            conf[a] >= min && conf[b] >= min && conf[c] >= min;
+        public static bool Valid(float[] conf, float min, int a, int b, int c, int d) =>
+            conf[a] >= min && conf[b] >= min && conf[c] >= min && conf[d] >= min;
+        public static bool Valid(float[] conf, float min, int a, int b, int c, int d, int e, int f) =>
+            conf[a] >= min && conf[b] >= min && conf[c] >= min &&
+            conf[d] >= min && conf[e] >= min && conf[f] >= min;
+
         /// <summary>Exponential moving average: state += alpha * (value - state).</summary>
         public static float Ema(float state, float value, float alpha) => state + alpha * (value - state);
     }

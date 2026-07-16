@@ -346,7 +346,7 @@ namespace Kinex.MotionLab
         static void ConfigureDetector(MediaPipePoseDetector detector)
         {
             var so = new SerializedObject(detector);
-            so.FindProperty("modelFileName").stringValue = "pose_landmarker_full.bytes";
+            so.FindProperty("modelFileName").stringValue = "pose_landmarker_lite.bytes";
             so.FindProperty("flipX").boolValue = true;
             so.FindProperty("flipY").boolValue = true;
             so.FindProperty("use3DWorld").boolValue = true;

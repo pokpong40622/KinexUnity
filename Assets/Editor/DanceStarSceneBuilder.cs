@@ -133,7 +133,7 @@ namespace Kinex.EditorTools
         static void ConfigureDetector(MediaPipePoseDetector detector)
         {
             var so = new SerializedObject(detector);
-            so.FindProperty("modelFileName").stringValue = "pose_landmarker_full.bytes";
+            so.FindProperty("modelFileName").stringValue = "pose_landmarker_lite.bytes";
             so.FindProperty("flipX").boolValue = true;
             so.FindProperty("flipY").boolValue = true;
             so.FindProperty("use3DWorld").boolValue = false;   // 2D detectors only — no avatar to drive

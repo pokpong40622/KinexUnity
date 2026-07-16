@@ -17,7 +17,17 @@ namespace Kinex.App
     /// </summary>
     public class SceneRouter : MonoBehaviour
     {
-        void Awake() => DontDestroyOnLoad(gameObject);
+        void Awake()
+        {
+            DontDestroyOnLoad(gameObject);
+            // This player renders OFFSCREEN (flutter_embed_unity blits into a Flutter texture),
+            // so it never gets normal display-driven VSync pacing. Left unset, Unity's frame rate
+            // here is effectively undefined — it can free-run and burn CPU/GPU (thermal throttling
+            // reads as "laggy even on a new tablet") or default to an unexpectedly low cap. Pin it
+            // explicitly, once, for every game this player can load.
+            Application.targetFrameRate = 60;
+            QualitySettings.vSyncCount = 0;
+        }
 
         void Start() => SendToFlutter.Send("{\"type\":\"unity_ready\"}");
 
@@ -41,8 +51,8 @@ namespace Kinex.App
                 case "motionlab":
                     SceneManager.LoadScene("MotionLabScene");
                     break;
-                case "astrostance":
-                    SceneManager.LoadScene("AstroStanceScene");
+                case "thedasher":
+                    SceneManager.LoadScene("TheDasherScene");
                     break;
                 default:
                     Debug.LogWarning($"[SceneRouter] Unknown game id: '{gameId}'");

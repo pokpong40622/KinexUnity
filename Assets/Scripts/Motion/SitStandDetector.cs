@@ -102,7 +102,7 @@ namespace Kinex.Motion
         /// factor (in torso lengths). Real chair sits measured off tablet footage drop only
         /// ~0.37 torso — and the apparent torso also shrinks while seated, which the
         /// distance-normalization in Tick amplifies — so games that must reliably see
-        /// JustSat from an estimated baseline (AstroStance) pass a shallower factor
+        /// JustSat from an estimated baseline (TheDasher) pass a shallower factor
         /// (~0.30) and let the adaptive range learn the player's true depth.
         /// </summary>
         public void EstimateSeatedFromStanding(float offsetFactor)

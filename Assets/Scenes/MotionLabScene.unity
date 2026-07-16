@@ -1914,7 +1914,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c540c9430591eca46ac33cce9a1f68bc, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MediaPipePoseDetector
-  modelFileName: pose_landmarker_full.bytes
+  modelFileName: pose_landmarker_lite.bytes
   minDetectionConfidence: 0.5
   smoothingFactor: 0.5
   legSmoothing: 0.13
