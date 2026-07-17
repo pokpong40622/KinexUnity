@@ -301,6 +301,10 @@ namespace Kinex.TheDasher
             // shown before Unity is even embedded — so introPanel is retired and every entry into
             // this scene goes straight to Framing instead of waiting on OnStartPressed().
             EnterFraming();
+
+            // Background music for the whole session. Drop your own CC0 track at
+            // Assets/Resources/Music/dasher_theme.* to replace it — no code change needed.
+            Music.Play("dasher_theme", 0.30f);
         }
 
         void Update()
@@ -685,7 +689,11 @@ namespace Kinex.TheDasher
             _crouchPoseActive = false;
         }
 
-        void OnDestroy() => _poseHandler?.Dispose();
+        void OnDestroy()
+        {
+            Music.Stop();
+            _poseHandler?.Dispose();
+        }
 
         void TickKicks()
         {

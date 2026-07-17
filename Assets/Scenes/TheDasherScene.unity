@@ -47809,8 +47809,8 @@ MonoBehaviour:
   oneEuroMinCutoff: 0.05
   oneEuroBeta: 20
   drivesAvatar: 1
-  minBoneVisibility: 0.3
-  legVisThreshold: 0.3
+  minBoneVisibility: 0.25
+  legVisThreshold: 0.22
   legMaxDegPerSec: 540
   testVideoClip: {fileID: 0}
   preferredCameraName: 
@@ -47825,7 +47825,7 @@ MonoBehaviour:
   steadyUpperSpine: 1
   use3DWorld: 1
   followStrength: 1
-  legSensitivity: 0.55
+  legSensitivity: 0.78
   hipSway: 1
   hipSwayScale: 2.5
   worldDepthScale: 0.35

@@ -62,5 +62,14 @@ namespace Kinex.App
                     break;
             }
         }
+
+        // Pause / resume the currently-loaded game. Driven by the Hang Glider's
+        // in-game pause overlay in Flutter. Time.timeScale is global, so this
+        // persistent router can freeze any scene it lives above.
+        //   sendToUnity("SceneRouter", "SetPaused", "true" | "false")
+        public void SetPaused(string paused)
+        {
+            Time.timeScale = (paused == "true" || paused == "1") ? 0f : 1f;
+        }
     }
 }
