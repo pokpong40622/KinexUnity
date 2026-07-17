@@ -251,6 +251,14 @@ namespace Kinex.TheDasher
             // left). The avatar limb retarget is therefore decoupled from the detection flags and set
             // to the opposite of before (dropped the `!`) so the shown leg matches the real one.
             if (poseDetector != null) poseDetector.SameSideRetarget = invertLateralForBackView;
+
+            // Drive the avatar from the reliable 2D screen-plane keypoints — the SAME data the
+            // skeleton overlay draws (which tracks the kick correctly). The metric GHUM world
+            // landmarks collapse for the legs when the tablet can't see the lower body well
+            // (on-device logcat: visAnkle ~0.1, knee sitting at hip height), so the 3D driver left
+            // the avatar's leg unmoved even though detection/scoring were correct. Pinning here beats
+            // a stale "3D" PlayerPref left on the device from the in-game gear toggle.
+            if (poseDetector != null) poseDetector.PinDriveMode2D();
         }
 
 #if UNITY_EDITOR
@@ -1086,6 +1094,27 @@ namespace Kinex.TheDasher
         {
             if (_state != State.Intro) return;
             EnterFraming();
+        }
+
+        /// <summary>Framing-screen "เริ่มเลย" (start anyway). The full-body gate is a GUIDE, not a
+        /// hard requirement (user request: don't trap me if the camera can't see all of me). Capture
+        /// a best-effort baseline from whatever pose is visible right now and go straight into the
+        /// countdown — detection self-corrects from there. Safe if no pose yet (baseline is skipped).</summary>
+        public void OnFramingSkipPressed()
+        {
+            if (_state != State.Framing) return;
+            if (framingPanel != null) framingPanel.SetActive(false);
+            if (calibGroup != null) calibGroup.SetActive(false);
+            if (bodyLostIgnoreButton != null) bodyLostIgnoreButton.gameObject.SetActive(false);
+            if (!useKeyboardStub && HasLivePose)
+            {
+                var kp = poseDetector.LatestKeypoints;
+                _sideKick.SetBaseline(kp);
+                _lane.CalibrateCenter(kp);
+            }
+            _calibrated = true;
+            Kinex.Sfx.Play("go", 0.6f);
+            EnterCountdown();
         }
 
         /// <summary>Wired to bodyLostIgnoreButton.onClick. Opts out of future body-loss LOCKS for

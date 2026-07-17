@@ -82,6 +82,10 @@ public class MediaPipePoseDetector : MonoBehaviour
              "MediaPipe jumps so legs can't fly or snap-twist on a noisy frame. " +
              "Lower = steadier but laggier. This is the legs' main stabilizer.")]
     [SerializeField][Range(60f, 1080f)] float legMaxDegPerSec = 540f;
+    [Tooltip("Max degrees/second ANY non-leg bone may rotate toward its target. Caps sudden " +
+             "MediaPipe jumps so a noisy frame can't snap a limb to a broken angle ('bone crack'). " +
+             "Legs use legMaxDegPerSec instead (they're noisier). Lower = steadier but laggier.")]
+    [SerializeField][Range(120f, 1440f)] float maxDegPerSec = 720f;
 
     [Header("Test Source (leave EMPTY for normal webcam)")]
     [Tooltip("TEST ONLY: assign a video clip to feed it to pose detection instead of the live " +
@@ -869,6 +873,24 @@ public class MediaPipePoseDetector : MonoBehaviour
     public void ToggleArmsOnly() { armsOnly = !armsOnly; PlayerPrefs.SetInt(PrefArms, armsOnly ? 1 : 0); PlayerPrefs.Save(); }
 
     public bool Use3DWorld => use3DWorld;
+    // A scene director can PIN the driving mode to the reliable 2D screen-plane path, so a stale
+    // 3D PlayerPref from the in-game gear toggle can't override it (TheDasher does this — its avatar
+    // is driven best from the same 2D keypoints the skeleton uses; GHUM world legs collapse when the
+    // lower body is only marginally visible). When pinned, LoadFlips leaves use3DWorld alone.
+    bool _driveModePinned;
+    // Also forces FULL-BODY + FULL-STRENGTH and makes LoadFlips ignore the stale gear-panel
+    // PlayerPrefs (kinex_armsonly / kinex_sens). On-device logcat proved the real leg/arm bug: a
+    // stale kinex_armsonly=1 forced ARMS-ONLY mode every launch (so `if(!armsOnly)` skipped ALL leg
+    // driving — the legs literally never moved), and a stale kinex_sens=0.40 pinned followStrength at
+    // 40% (weak arms). Both carried over from a previous session's gear toggles. TheDasher needs
+    // full-body, full-strength, so it pins them here and LoadFlips leaves them alone.
+    public void PinDriveMode2D()
+    {
+        use3DWorld = false;
+        armsOnly = false;
+        followStrength = 1f;
+        _driveModePinned = true;
+    }
     // Smoothed whole-body yaw (degrees) the avatar is currently turned by. Used by the coach to
     // tell the player to turn toward a side-on trainer pose (yaw can't be seen in 2D image space).
     public float YawDeg => _yawDeg;
@@ -884,14 +906,24 @@ public class MediaPipePoseDetector : MonoBehaviour
         PlayerPrefs.DeleteKey(PrefX);
         PlayerPrefs.DeleteKey(PrefY);
 
-        // Sensitivity and arms-only mode are still persisted (user-adjustable in-game).
-        if (PlayerPrefs.HasKey(PrefSens)) followStrength = PlayerPrefs.GetFloat(PrefSens);
-        if (PlayerPrefs.HasKey(PrefArms)) armsOnly = PlayerPrefs.GetInt(PrefArms) == 1;
+        // Sensitivity and arms-only mode are persisted (user-adjustable in-game) — but NOT when a
+        // director has PINNED the mode (TheDasher). A stale kinex_armsonly=1 / kinex_sens=0.40 from a
+        // previous session was forcing arms-only + weak arms on every launch (see PinDriveMode2D).
+        // The live gear Sens+/- / ArmsOnly toggles still work within a session; they just no longer
+        // carry a stale value into the next launch for a pinned scene.
+        if (!_driveModePinned)
+        {
+            if (PlayerPrefs.HasKey(PrefSens)) followStrength = PlayerPrefs.GetFloat(PrefSens);
+            if (PlayerPrefs.HasKey(PrefArms)) armsOnly = PlayerPrefs.GetInt(PrefArms) == 1;
+        }
 
         // Tracking mode: DEFAULT 2D (flat screen-plane driver), but the player's last gear choice
         // persists across relaunches so the toggle actually sticks. (Previously we force-reset to 3D
         // every boot, which made the toggle look broken — 2D never survived a relaunch.)
-        use3DWorld = PlayerPrefs.HasKey(PrefTrack3D) ? PlayerPrefs.GetInt(PrefTrack3D) == 1 : false;
+        // If a director has PINNED 2D (PinDriveMode2D), leave use3DWorld alone so a stale 3D pref
+        // can't override the pin.
+        if (!_driveModePinned)
+            use3DWorld = PlayerPrefs.HasKey(PrefTrack3D) ? PlayerPrefs.GetInt(PrefTrack3D) == 1 : false;
     }
 
     void BuildCocoKeypoints(IReadOnlyList<Mediapipe.Tasks.Components.Containers.NormalizedLandmark> norm)
@@ -947,9 +979,15 @@ public class MediaPipePoseDetector : MonoBehaviour
             Vector2 rsh = kp[R_SHOULDER], rel = kp[R_ELBOW], rwr = kp[R_WRIST];
             Debug.Log("[PoseDebug2D] armsOnly=" + (armsOnly ? 1 : 0) +
                       " foll=" + followStrength.ToString("0.00") +
+                      " legSens=" + legSensitivity.ToString("0.00") +
                       " flip=" + (flipX ? 1 : 0) + (flipY ? 1 : 0) +
                       " confRsh=" + conf[R_SHOULDER].ToString("0.00") +
-                      " Rsh=" + rsh.ToString("F2") + " Rel=" + rel.ToString("F2") + " Rwr=" + rwr.ToString("F2"));
+                      " Rsh=" + rsh.ToString("F2") + " Rel=" + rel.ToString("F2") + " Rwr=" + rwr.ToString("F2") +
+                      // Leg diagnostics for the side-kick (does the avatar leg move?): confidence gate +
+                      // hip/knee/ankle positions. If confL/R < minBoneVisibility the leg is frozen home.
+                      " | LEG confHip=" + conf[R_HIP].ToString("0.00") + " confKnee=" + conf[R_KNEE].ToString("0.00") +
+                      " confAnk=" + conf[R_ANKLE].ToString("0.00") + " gate=" + minBoneVisibility.ToString("0.00") +
+                      " Rhip=" + kp[R_HIP].ToString("F2") + " Rkne=" + kp[R_KNEE].ToString("F2") + " Rank=" + kp[R_ANKLE].ToString("F2"));
         }
 
         // Body turn (yaw) from the shoulders' horizontal-plane angle — applied to every driven bone
@@ -992,10 +1030,15 @@ public class MediaPipePoseDetector : MonoBehaviour
             float legStr = followStrength * legSensitivity;
             int aHip2 = sameSideRetarget ? L_HIP : R_HIP, aKne2 = sameSideRetarget ? L_KNEE : R_KNEE, aAnk2 = sameSideRetarget ? L_ANKLE : R_ANKLE;
             int bHip2 = sameSideRetarget ? R_HIP : L_HIP, bKne2 = sameSideRetarget ? R_KNEE : L_KNEE, bAnk2 = sameSideRetarget ? R_ANKLE : L_ANKLE;
-            TryDrive(HumanBodyBones.LeftUpperLeg,  kp, conf, aHip2, aKne2, t, legStr);
-            TryDrive(HumanBodyBones.LeftLowerLeg,  kp, conf, aKne2, aAnk2, t, legStr);
-            TryDrive(HumanBodyBones.RightUpperLeg, kp, conf, bHip2, bKne2, t, legStr);
-            TryDrive(HumanBodyBones.RightLowerLeg, kp, conf, bKne2, bAnk2, t, legStr);
+            // Legs use their OWN (lower) visibility gate — the tablet reads the ankle at only ~0.1
+            // confidence even during a clean kick (on-device logcat), so gating legs at the general
+            // 0.25 froze the shin every frame. legVisThreshold lets the leg drive at low confidence
+            // (noisier, but it actually MOVES — which is what the kick needs).
+            float legT = legVisThreshold;
+            TryDrive(HumanBodyBones.LeftUpperLeg,  kp, conf, aHip2, aKne2, legT, legStr);
+            TryDrive(HumanBodyBones.LeftLowerLeg,  kp, conf, aKne2, aAnk2, legT, legStr);
+            TryDrive(HumanBodyBones.RightUpperLeg, kp, conf, bHip2, bKne2, legT, legStr);
+            TryDrive(HumanBodyBones.RightLowerLeg, kp, conf, bKne2, bAnk2, legT, legStr);
             ApplyHipSway(kp, conf, t);
         }
     }
@@ -1100,7 +1143,11 @@ public class MediaPipePoseDetector : MonoBehaviour
         Quaternion full = Quaternion.FromToRotation(_tPoseDir[bone], target) * _tPoseRot[(int)bone];
         // Pre-multiply the body yaw so this bone turns WITH the body (all driven bones get the same
         // yaw → the figure rotates coherently). Identity when bodyTurn is off / facing forward.
-        t.rotation = _bodyYaw * Quaternion.Slerp(_tPoseRot[(int)bone], full, strength);
+        Quaternion desired = _bodyYaw * Quaternion.Slerp(_tPoseRot[(int)bone], full, strength);
+        // Rate-limit toward the target so a single noisy MediaPipe frame can't snap the limb to a
+        // broken angle ('bone crack'). Legs get their own (lower) cap — they're the noisiest joints.
+        float cap = (IsLegBone(bone) ? legMaxDegPerSec : maxDegPerSec) * Time.deltaTime;
+        t.rotation = Quaternion.RotateTowards(t.rotation, desired, cap);
     }
 
     // Body yaw from the two shoulders: their vector in the horizontal (x–z) plane tilts as you turn,
@@ -1146,6 +1193,19 @@ public class MediaPipePoseDetector : MonoBehaviour
         if (_animator == null || !_world33Init) return;
 
         ComputeBodyYaw3D();
+
+        if (debugLog && Time.time - _lastDbg > 0.5f)
+        {
+            _lastDbg = Time.time;
+            // 3D-path leg diagnostics for the side-kick: world-landmark visibility gate + knee/ankle.
+            // If visKnee/visAnk < minBoneVisibility the avatar leg is frozen home (won't kick).
+            Debug.Log("[PoseDebug3D] legSens=" + legSensitivity.ToString("0.00") +
+                      " gate=" + minBoneVisibility.ToString("0.00") + " depthScale=" + worldDepthScale.ToString("0.00") +
+                      " visHip=" + _world33[MP_R_HIP].visibility.ToString("0.00") +
+                      " visKnee=" + _world33[MP_R_KNEE].visibility.ToString("0.00") +
+                      " visAnk=" + _world33[MP_R_ANKLE].visibility.ToString("0.00") +
+                      " Rknee=" + World(MP_R_KNEE).ToString("F2") + " Rank=" + World(MP_R_ANKLE).ToString("F2"));
+        }
 
         if (armsOnly)
         {
@@ -1230,7 +1290,10 @@ public class MediaPipePoseDetector : MonoBehaviour
         Vector3 target = (Quaternion.Inverse(_bodyYaw) * worldTarget).normalized;
 
         Quaternion full = Quaternion.FromToRotation(_tPoseDir[bone], target) * _tPoseRot[(int)bone];
-        t.rotation = _bodyYaw * Quaternion.Slerp(_tPoseRot[(int)bone], full, strength);
+        Quaternion desired = _bodyYaw * Quaternion.Slerp(_tPoseRot[(int)bone], full, strength);
+        // Rate-limit toward the target (see DriveSegment2D) so a noisy frame can't 'bone-crack' a limb.
+        float cap = (IsLegBone(bone) ? legMaxDegPerSec : maxDegPerSec) * Time.deltaTime;
+        t.rotation = Quaternion.RotateTowards(t.rotation, desired, cap);
     }
 
     // Which way are you facing? Detect it from the skeleton: how far the shoulder line (and hip line)
@@ -1281,11 +1344,25 @@ public class MediaPipePoseDetector : MonoBehaviour
     // so an off-camera / occluded leg or arm returns to the default pose. (Round 11.)
     void RestBone(HumanBodyBones bone)
     {
+        // Arms tuck IN against the torso in many natural poses (arm แนบตัว / hanging by the side).
+        // The wrist self-occludes there, so its visibility dips and easing the arm to the T-pose
+        // rest (arms OUT, horizontal) reads as the limb 'locking' at a raised angle — the exact
+        // complaint. So FREEZE arms in place on a low-visibility frame instead; everything else
+        // (torso/legs) still eases gently home so a lost leg returns to the default stance.
+        if (IsArmBone(bone)) return;
         var t = _animator.GetBoneTransform(bone);
         if (t != null)
             t.rotation = Quaternion.RotateTowards(t.rotation, _bodyYaw * _tPoseRot[(int)bone],
                                                   restReturnDegPerSec * Time.deltaTime);
     }
+
+    static bool IsArmBone(HumanBodyBones b) =>
+        b == HumanBodyBones.LeftUpperArm || b == HumanBodyBones.LeftLowerArm ||
+        b == HumanBodyBones.RightUpperArm || b == HumanBodyBones.RightLowerArm;
+
+    static bool IsLegBone(HumanBodyBones b) =>
+        b == HumanBodyBones.LeftUpperLeg || b == HumanBodyBones.LeftLowerLeg ||
+        b == HumanBodyBones.RightUpperLeg || b == HumanBodyBones.RightLowerLeg;
 
     // ---- T-pose caching (identical approach to PoseDetector.cs:194). ----
     void CacheTpose()

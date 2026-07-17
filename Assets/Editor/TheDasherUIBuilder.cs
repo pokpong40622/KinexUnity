@@ -250,6 +250,21 @@ namespace Kinex.TheDasher.EditorTools
                 thaiSemi, Gray, Color.white, 314, 820, 300, 80, 34, secondary: true);
             UnityEditor.Events.UnityEventTools.AddPersistentListener(bodyLostIgnoreBtn.onClick, director.OnBodyLostIgnorePressed);
 
+            // User-requested (misclick-safe): a LEAVE and a SKIP button on the framing screen so the
+            // player is never trapped at the full-body gate. Both live on FramingPanel (below the card),
+            // so they show whenever framing does. Leave → exit back to the app; Skip → start the run now
+            // without requiring a perfect full-body frame (full body is better, never REQUIRED — see
+            // TheDasherDirector.OnFramingSkipPressed). Always active — the director doesn't toggle these.
+            // Aligned to the card's own width (card is x=94, w=740 → spans 94..834), sitting just
+            // below its bottom edge (card ends y=920): Leave on the left, Skip on the right, a 20px
+            // gap between — so they read as a tidy pair directly under the "ให้เห็นตัวคุณทั้งตัว" card.
+            var framingLeaveBtn = AddPillButton(framing.transform, "FramingLeaveButton", "ออกจากเกม",
+                thaiSemi, Gray, Color.white, 94, 942, 360, 84, 34, secondary: true);
+            UnityEditor.Events.UnityEventTools.AddPersistentListener(framingLeaveBtn.onClick, director.OnExitPressed);
+            var framingSkipBtn = AddPillButton(framing.transform, "FramingSkipButton", "เริ่มเลย",
+                thaiSemi, Cyan, Color.white, 474, 942, 360, 84, 34, secondary: false);
+            UnityEditor.Events.UnityEventTools.AddPersistentListener(framingSkipBtn.onClick, director.OnFramingSkipPressed);
+
             // =================== CALIBRATION (canvas-level sibling — see class doc) ===================
             var calibGroup = NewPanel(canvas.transform, "CalibGroup");
             calibGroup.GetComponent<Image>().color = ScrimDim;
