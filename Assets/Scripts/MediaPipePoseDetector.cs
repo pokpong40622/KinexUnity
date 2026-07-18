@@ -117,6 +117,18 @@ public class MediaPipePoseDetector : MonoBehaviour
     // field toggle: it only affects THIS detector instance, so other scenes/games are unaffected
     // unless they also choose to call the setter.
     public bool SameSideRetarget { get => sameSideRetarget; set => sameSideRetarget = value; }
+    // TheDasher live-tuning: the LEGS can need different laterality than the arms (MediaPipe's
+    // left/right side inference is unreliable on a mirrored front cam), so a single global flip
+    // can't fix arms + legs together. These two XOR on top of the arm mapping so an on-screen
+    // debug panel can correct the legs INDEPENDENTLY. Default OFF = legs follow the arm mapping,
+    // exactly as before. Only affects THIS detector instance (other games unaffected).
+    [SerializeField] bool legSideSwap = false;   // XOR into leg keypoint side-selection (which leg)
+    [SerializeField] bool legFlipX = false;      // XOR into leg horizontal direction (leg pointing)
+    public bool LegSideSwap { get => legSideSwap; set => legSideSwap = value; }
+    public bool LegFlipX { get => legFlipX; set => legFlipX = value; }
+    public void ToggleSameSide() => sameSideRetarget = !sameSideRetarget;
+    public void ToggleLegSideSwap() => legSideSwap = !legSideSwap;
+    public void ToggleLegFlipX() => legFlipX = !legFlipX;
     [SerializeField] bool flipY = true;   // Android front cam: body needs Y-flip to appear upright
     [SerializeField] bool flipZ = false;
 
@@ -888,7 +900,7 @@ public class MediaPipePoseDetector : MonoBehaviour
     {
         use3DWorld = false;
         armsOnly = false;
-        followStrength = 1f;
+        followStrength = 0.85f; // TheDasher: slightly softer follow (user: "a little less sensitive")
         _driveModePinned = true;
     }
     // Smoothed whole-body yaw (degrees) the avatar is currently turned by. Used by the coach to
@@ -1001,12 +1013,22 @@ public class MediaPipePoseDetector : MonoBehaviour
         }
         else
         {
-            // Hips/pelvis first (root): knee-mid → hip-mid captures pelvic tilt.
-            TryDriveMidMid(HumanBodyBones.Hips,  kp, conf, L_KNEE, R_KNEE, L_HIP, R_HIP, t, followStrength);
-            TryDriveMidMid(HumanBodyBones.Spine, kp, conf, L_HIP, R_HIP, L_SHOULDER, R_SHOULDER, t, followStrength);
-            if (steadyUpperSpine) { RestBone(HumanBodyBones.Chest); RestBone(HumanBodyBones.Neck); }
+            // Torso: when steadyUpperSpine, keep the WHOLE torso (hips→spine→chest→neck) steady so
+            // the avatar stays upright and front-facing — TheDasher wants limb motion (arms + legs
+            // still follow below), NOT torso bend/turn (user: "just face the front, don't bend the
+            // body too much"). Otherwise drive the full chain.
+            if (steadyUpperSpine)
+            {
+                RestBone(HumanBodyBones.Hips);
+                RestBone(HumanBodyBones.Spine);
+                RestBone(HumanBodyBones.Chest);
+                RestBone(HumanBodyBones.Neck);
+            }
             else
             {
+                // Hips/pelvis first (root): knee-mid → hip-mid captures pelvic tilt.
+                TryDriveMidMid(HumanBodyBones.Hips,  kp, conf, L_KNEE, R_KNEE, L_HIP, R_HIP, t, followStrength);
+                TryDriveMidMid(HumanBodyBones.Spine, kp, conf, L_HIP, R_HIP, L_SHOULDER, R_SHOULDER, t, followStrength);
                 TryDriveMidMid(HumanBodyBones.Chest, kp, conf, L_SHOULDER, R_SHOULDER, L_EAR, R_EAR, t, followStrength);
                 TryDriveMid  (HumanBodyBones.Neck,  kp, conf, L_SHOULDER, R_SHOULDER, NOSE, t, followStrength);
             }
@@ -1028,8 +1050,9 @@ public class MediaPipePoseDetector : MonoBehaviour
         {
             // Legs follow at a reduced strength (legSensitivity) — they're the noisiest joints.
             float legStr = followStrength * legSensitivity;
-            int aHip2 = sameSideRetarget ? L_HIP : R_HIP, aKne2 = sameSideRetarget ? L_KNEE : R_KNEE, aAnk2 = sameSideRetarget ? L_ANKLE : R_ANKLE;
-            int bHip2 = sameSideRetarget ? R_HIP : L_HIP, bKne2 = sameSideRetarget ? R_KNEE : L_KNEE, bAnk2 = sameSideRetarget ? R_ANKLE : L_ANKLE;
+            bool legSame = sameSideRetarget ^ legSideSwap; // legs can differ from arms — see legSideSwap
+            int aHip2 = legSame ? L_HIP : R_HIP, aKne2 = legSame ? L_KNEE : R_KNEE, aAnk2 = legSame ? L_ANKLE : R_ANKLE;
+            int bHip2 = legSame ? R_HIP : L_HIP, bKne2 = legSame ? R_KNEE : L_KNEE, bAnk2 = legSame ? R_ANKLE : L_ANKLE;
             // Legs use their OWN (lower) visibility gate — the tablet reads the ankle at only ~0.1
             // confidence even during a clean kick (on-device logcat), so gating legs at the general
             // 0.25 froze the shin every frame. legVisThreshold lets the leg drive at low confidence
@@ -1130,7 +1153,8 @@ public class MediaPipePoseDetector : MonoBehaviour
         Transform t = _animator.GetBoneTransform(bone);
         if (t == null) return;
 
-        float dx = to2D.x - from2D.x; if (flipX) dx = -dx;
+        bool fx = flipX; if (IsLegBone(bone)) fx ^= legFlipX; // legs can flip direction independently
+        float dx = to2D.x - from2D.x; if (fx) dx = -dx;
         float dy = to2D.y - from2D.y; if (FlipYEff) dy = -dy;
         Vector3 screenTarget = new Vector3(dx, dy, 0f);
         if (screenTarget.sqrMagnitude < 0.01f) return;
@@ -1213,11 +1237,19 @@ public class MediaPipePoseDetector : MonoBehaviour
         }
         else
         {
-            TryDriveMidMid3D(HumanBodyBones.Hips,  MP_L_KNEE, MP_R_KNEE, MP_L_HIP, MP_R_HIP, followStrength);
-            TryDriveMidMid3D(HumanBodyBones.Spine, MP_L_HIP, MP_R_HIP, MP_L_SHOULDER, MP_R_SHOULDER, followStrength);
-            if (steadyUpperSpine) { RestBone(HumanBodyBones.Chest); RestBone(HumanBodyBones.Neck); }
+            // Mirror of the 2D path: steadyUpperSpine keeps the whole torso upright/front-facing
+            // (only arms + legs follow); otherwise drive the full chain.
+            if (steadyUpperSpine)
+            {
+                RestBone(HumanBodyBones.Hips);
+                RestBone(HumanBodyBones.Spine);
+                RestBone(HumanBodyBones.Chest);
+                RestBone(HumanBodyBones.Neck);
+            }
             else
             {
+                TryDriveMidMid3D(HumanBodyBones.Hips,  MP_L_KNEE, MP_R_KNEE, MP_L_HIP, MP_R_HIP, followStrength);
+                TryDriveMidMid3D(HumanBodyBones.Spine, MP_L_HIP, MP_R_HIP, MP_L_SHOULDER, MP_R_SHOULDER, followStrength);
                 TryDriveMidMid3D(HumanBodyBones.Chest, MP_L_SHOULDER, MP_R_SHOULDER, MP_L_EAR, MP_R_EAR, followStrength);
                 TryDriveMid3D  (HumanBodyBones.Neck,  MP_L_SHOULDER, MP_R_SHOULDER, MP_NOSE, followStrength);
             }
@@ -1344,16 +1376,15 @@ public class MediaPipePoseDetector : MonoBehaviour
     // so an off-camera / occluded leg or arm returns to the default pose. (Round 11.)
     void RestBone(HumanBodyBones bone)
     {
-        // Arms tuck IN against the torso in many natural poses (arm แนบตัว / hanging by the side).
-        // The wrist self-occludes there, so its visibility dips and easing the arm to the T-pose
-        // rest (arms OUT, horizontal) reads as the limb 'locking' at a raised angle — the exact
-        // complaint. So FREEZE arms in place on a low-visibility frame instead; everything else
-        // (torso/legs) still eases gently home so a lost leg returns to the default stance.
-        if (IsArmBone(bone)) return;
+        // Undetected part → ease it back to its default rest pose (user: "if it didn't detect a
+        // part of the body, set that to default position"). Arms ease at HALF rate: a brief wrist
+        // self-occlusion during play (arm แนบตัว / hanging by the side) shouldn't snap the arm out
+        // to the T-rest, but a sustained loss still returns it to the default stance like the legs.
         var t = _animator.GetBoneTransform(bone);
-        if (t != null)
-            t.rotation = Quaternion.RotateTowards(t.rotation, _bodyYaw * _tPoseRot[(int)bone],
-                                                  restReturnDegPerSec * Time.deltaTime);
+        if (t == null) return;
+        float rate = IsArmBone(bone) ? restReturnDegPerSec * 0.5f : restReturnDegPerSec;
+        t.rotation = Quaternion.RotateTowards(t.rotation, _bodyYaw * _tPoseRot[(int)bone],
+                                              rate * Time.deltaTime);
     }
 
     static bool IsArmBone(HumanBodyBones b) =>

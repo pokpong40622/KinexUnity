@@ -44,6 +44,12 @@ namespace Kinex.TheDasher
                  "pre-fix mapping) rather than hunting through the three call sites individually.")]
         public bool invertLateralForBackView = true;
 
+        [Tooltip("TEMP tuning aid: shows an on-screen panel with 4 buttons to flip the avatar's " +
+                 "arm-side, arm-direction, leg-side and leg-direction live on device, so the correct " +
+                 "retarget mapping can be found in ONE build. Mapping now CONFIRMED + baked — leave " +
+                 "OFF. Flip on only if the mapping ever needs re-tuning.")]
+        public bool showRetargetDebug = false;
+
         [Header("Avatar")]
         [Tooltip("Wrapper the lane locomotion slides sideways. The character model is its child.")]
         public Transform avatarRoot;
@@ -59,7 +65,7 @@ namespace Kinex.TheDasher
         [Tooltip("How far the avatar's hips drop (metres) while the sit is held. Paired with the " +
                  "scripted knee bend below so the feet stay planted — together they read as a real " +
                  "crouch to pick up the tool. 0 = no dip.")]
-        public float sitDipMeters = 0.20f;
+        public float sitDipMeters = 0.36f;
         [Tooltip("Seconds for the sit crouch to fully ease in/out. Lower = snappier.")]
         public float sitDipSeconds = 0.35f;
 
@@ -179,6 +185,7 @@ namespace Kinex.TheDasher
         float _toastTimer;
         Coroutine _scoreChangeRoutine;
         Coroutine _feedbackRoutine;
+        SosController _sos;   // emergency fall-alert overlay
         float _avatarBaseX;
         float _avatarBaseY;
         float _sitDip01;   // 0 = standing, 1 = fully dipped into the sit crouch (smoothed)
@@ -246,11 +253,12 @@ namespace Kinex.TheDasher
             // other games (their own MediaPipePoseDetector, their own sameSideRetarget default)
             // are unaffected. TheDasherSceneBuilder.ConfigureDetector still seeds an editor-time
             // default, but this runtime push is authoritative from here on.
-            // User confirmed on device: the kick SIDE and lane detection are correct, but the
-            // avatar's VISIBLE kicking leg was mirrored (player kicks right leg → avatar kicked its
-            // left). The avatar limb retarget is therefore decoupled from the detection flags and set
-            // to the opposite of before (dropped the `!`) so the shown leg matches the real one.
-            if (poseDetector != null) poseDetector.SameSideRetarget = invertLateralForBackView;
+            // CONFIRMED ON DEVICE (via the live 4-button tuning panel): the correct mapping is
+            // SameSideRetarget = FALSE together with scene flipX = 0 and legs at their default
+            // (legSideSwap/legFlipX off). One tap of "ARM swap L/R" from the previous (same-side,
+            // flipX 0) build fixed both arms AND legs, i.e. the winning combo is !same-side. Lane/kick
+            // above keep reading invertLateralForBackView directly, so they stay correct.
+            if (poseDetector != null) poseDetector.SameSideRetarget = !invertLateralForBackView;
 
             // Drive the avatar from the reliable 2D screen-plane keypoints — the SAME data the
             // skeleton overlay draws (which tracks the kick correctly). The metric GHUM world
@@ -304,6 +312,19 @@ namespace Kinex.TheDasher
             if (bodyLostToast != null) bodyLostToast.SetActive(false);
             UpdateScoreText();
             UpdateTimerText();
+
+            // Emergency fall-alert overlay (SOS). Lives on this director and watches the pose for a
+            // fall; if one fires it counts down and asks Flutter to auto-dial the emergency contact.
+            // The score display doubles as a TEST trigger — tap it to preview the whole SOS flow.
+            _sos = gameObject.AddComponent<SosController>();
+            _sos.poseDetector = poseDetector;
+            if (scoreText != null)
+            {
+                var sosTestBtn = scoreText.gameObject.GetComponent<Button>();
+                if (sosTestBtn == null) sosTestBtn = scoreText.gameObject.AddComponent<Button>();
+                sosTestBtn.transition = Selectable.Transition.None;
+                sosTestBtn.onClick.AddListener(() => _sos.Show());
+            }
 
             // The start/mission screen (logo, subtitle, instruction cards) now lives in Flutter,
             // shown before Unity is even embedded — so introPanel is retired and every entry into
@@ -362,7 +383,8 @@ namespace Kinex.TheDasher
             if (framingPanel != null) framingPanel.SetActive(true);
             if (calibGroup != null) calibGroup.SetActive(false);
             if (introPanel != null) introPanel.SetActive(false);
-            SetPreviewVisible(true); // the run has begun — show the live camera preview from here on
+            SetPreviewVisible(true); // show the live camera preview from here on (its toggle BUTTON
+                                     // is kept hidden in SetPreviewVisible — user wanted the button gone, not the preview)
             if (_runStarted && spawner != null) spawner.SetPaused(true);
             // Default OFF every time framing is entered — the initial pre-Start pass NEVER shows it;
             // HandleBodyLost turns it on right after calling this, ONLY for a mid-game lock.
@@ -544,7 +566,10 @@ namespace Kinex.TheDasher
 
         void TickLaneMovement(float dt)
         {
-            int lane = PlayerLane;
+            // Sitting locks the avatar to the MIDDLE lane: treasures only ever land center (the
+            // player sits in a chair fixed at the middle lane), so a held sit means "I'm sitting in
+            // the middle to grab the treasure" regardless of any lane drift the detector reports.
+            int lane = _sitHeld ? 0 : PlayerLane;
             if (lane != _lastLane)
             {
                 _result.laneSteps++;
@@ -580,7 +605,7 @@ namespace Kinex.TheDasher
                 // Sit down over a treasure that landed in this lane: grab the tool now. The actual
                 // pickup happens once the crouch bottoms out (below) so the character is visibly
                 // seated and reaching the floor before the treasure is claimed.
-                var treasure = spawner != null ? spawner.ActiveItem(DasherKind.Treasure, PlayerLane) : null;
+                var treasure = spawner != null ? spawner.ActiveItem(DasherKind.Treasure, 0) : null;
                 if (treasure != null && _tool == null)
                 {
                     AttachTool();
@@ -594,7 +619,7 @@ namespace Kinex.TheDasher
             if (_claimPending && _sitDip01 >= 0.85f)
             {
                 _claimPending = false;
-                var treasure = spawner != null ? spawner.ActiveItem(DasherKind.Treasure, PlayerLane) : null;
+                var treasure = spawner != null ? spawner.ActiveItem(DasherKind.Treasure, 0) : null;
                 if (treasure != null)
                 {
                     treasure.Collect(avatarRoot);
@@ -674,14 +699,15 @@ namespace Kinex.TheDasher
         {
             var names = HumanTrait.MuscleName;
             System.Func<string, int> mi = s => { for (int i = 0; i < names.Length; i++) if (names[i] == s) return i; return -1; };
-            // A gentle crouch to pick the treasure off the floor (behind-view): thighs partway
-            // forward, a mild knee bend so the feet stay planted (a deeper fold tucks the shins up
-            // behind = a kneel), and a slight forward spine so the character reads as reaching down.
+            // A deep นั่งยองๆ squat to pick the treasure off the floor (behind-view): thighs fold
+            // well forward + a strong knee bend so the character drops onto its haunches, with a
+            // clear forward spine so it reads as reaching down. Paired with a bigger sitDipMeters
+            // hip drop so the lowered body keeps the feet near the ground.
             var map = new (string name, float val)[]
             {
-                ("Left Upper Leg Front-Back", 0.45f), ("Right Upper Leg Front-Back", 0.45f),
-                ("Left Lower Leg Stretch", -0.35f),   ("Right Lower Leg Stretch", -0.35f),
-                ("Spine Front-Back", 0.12f),
+                ("Left Upper Leg Front-Back", 0.85f), ("Right Upper Leg Front-Back", 0.85f),
+                ("Left Lower Leg Stretch", -0.7f),    ("Right Lower Leg Stretch", -0.7f),
+                ("Spine Front-Back", 0.22f),
             };
             _crouchMuscle = new int[map.Length];
             _crouchTarget = new float[map.Length];
@@ -1175,7 +1201,9 @@ namespace Kinex.TheDasher
                 cg.alpha = show ? 1f : 0f;
                 cg.blocksRaycasts = show;
             }
-            if (previewToggleButton != null) previewToggleButton.SetActive(show);
+            // Toggle button removed per user request — the camera preview stays, but its on-screen
+            // "debug pose" toggle is never shown.
+            if (previewToggleButton != null) previewToggleButton.SetActive(false);
         }
 
         public void OnPlayAgainPressed()
@@ -1187,6 +1215,30 @@ namespace Kinex.TheDasher
         {
             OnExitRequested?.Invoke();
             SendToFlutter.Send("{\"type\":\"exit\"}");
+        }
+
+        // TEMP retarget-tuning panel (gated by showRetargetDebug). Four big buttons to flip the
+        // avatar's arm/leg side + direction LIVE on device, so the correct mapping is found in one
+        // build. Read the top label for the final combo, then bake it and turn showRetargetDebug off.
+        void OnGUI()
+        {
+            if (!showRetargetDebug || poseDetector == null) return;
+            GUI.skin.button.fontSize = 32;
+            GUI.skin.label.fontSize = 30;
+            float w = 540f, h = 92f, x = 30f, y = 240f, gap = 14f;
+            GUI.color = Color.yellow;
+            GUI.Label(new Rect(x, y, w, 74f),
+                $"ARM side:{(poseDetector.SameSideRetarget ? "same" : "cross")}  dir:{(poseDetector.FlipX ? "flip" : "norm")}\n" +
+                $"LEG side:{(poseDetector.LegSideSwap ? "swap" : "follow")}  dir:{(poseDetector.LegFlipX ? "flip" : "norm")}");
+            GUI.color = Color.white;
+            y += 84f;
+            if (GUI.Button(new Rect(x, y, w, h), "1) ARM  swap L/R")) poseDetector.ToggleSameSide();
+            y += h + gap;
+            if (GUI.Button(new Rect(x, y, w, h), "2) ARM  flip direction")) poseDetector.ToggleMirror();
+            y += h + gap;
+            if (GUI.Button(new Rect(x, y, w, h), "3) LEG  swap L/R")) poseDetector.ToggleLegSideSwap();
+            y += h + gap;
+            if (GUI.Button(new Rect(x, y, w, h), "4) LEG  flip direction")) poseDetector.ToggleLegFlipX();
         }
     }
 }

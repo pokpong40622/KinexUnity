@@ -47333,8 +47333,8 @@ MonoBehaviour:
   legMaxDegPerSec: 540
   maxDegPerSec: 720
   testVideoClip: {fileID: 0}
-  preferredCameraName: 
-  flipX: 1
+  preferredCameraName:
+  flipX: 0
   sameSideRetarget: 1
   flipY: 1
   flipZ: 0
@@ -47346,10 +47346,10 @@ MonoBehaviour:
   use3DWorld: 1
   followStrength: 1
   legSensitivity: 0.78
-  hipSway: 1
+  hipSway: 0
   hipSwayScale: 2.5
   worldDepthScale: 0.35
-  bodyTurn: 1
+  bodyTurn: 0
   bodyTurnGain: 1.4
   bodyTurnMaxDeg: 92
   bodyTurnSmoothing: 0.12
@@ -81051,7 +81051,7 @@ MonoBehaviour:
   laneLerpSpeed: 4
   leanDegrees: 7
   avatarLaneMoveScale: 0.65
-  sitDipMeters: 0.2
+  sitDipMeters: 0.36
   sitDipSeconds: 0.35
   spawner: {fileID: 1856202460}
   sessionSeconds: 180
@@ -96091,7 +96091,7 @@ MonoBehaviour:
   laneSpacing: 1
   impactZ: 1.8
   spawnHeight: 7
-  fallSeconds: 4
+  fallSeconds: 5.2
   ringHoverHeight: 0.45
   beatInterval: 6.2
   firstBeatDelay: 2.5
