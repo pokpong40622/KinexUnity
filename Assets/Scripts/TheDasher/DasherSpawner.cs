@@ -99,6 +99,20 @@ namespace Kinex.TheDasher
 
         public float LaneWorldX(int lane) => lane * laneSpacing;
 
+        /// <summary>Drop a single real prop off the beat schedule (used by the tutorial so the
+        /// player sees the ACTUAL meteor/treasure/kick-ring, not just a picture card). Uses the
+        /// current fallSeconds/window fields, so the director can slow it down for teaching.</summary>
+        public DasherItem SpawnOne(DasherKind kind, int lane) => SpawnItem(kind, lane);
+
+        /// <summary>Fade + forget every live item without touching the beat clock (tutorial uses
+        /// this between steps and before handing off to the real run).</summary>
+        public void ClearItems()
+        {
+            Prune();
+            foreach (var item in _items) if (item != null) item.FadeAway();
+            _items.Clear();
+        }
+
         void Update()
         {
             if (!_running || _paused || _deck == null || _next >= _deck.Length) return;
@@ -130,7 +144,7 @@ namespace Kinex.TheDasher
             return other;
         }
 
-        void SpawnItem(DasherKind kind, int lane)
+        DasherItem SpawnItem(DasherKind kind, int lane)
         {
             GameObject go;
             Color telegraphColor;
@@ -173,6 +187,7 @@ namespace Kinex.TheDasher
             item.Expired += i => ItemExpired?.Invoke(i);
             _items.Add(item);
             ItemSpawned?.Invoke(item);
+            return item;
         }
 
         // Unity's destroyed-object fake-null covers items whose GameObject is gone.

@@ -15,16 +15,16 @@ RenderSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 10
   m_Fog: 1
-  m_FogColor: {r: 0.74, g: 0.84, b: 0.94, a: 1}
+  m_FogColor: {r: 0.72, g: 0.82, b: 0.93, a: 1}
   m_FogMode: 1
   m_FogDensity: 0.0022
-  m_LinearFogStart: 280
-  m_LinearFogEnd: 1100
-  m_AmbientSkyColor: {r: 0.212, g: 0.227, b: 0.259, a: 1}
-  m_AmbientEquatorColor: {r: 0.114, g: 0.125, b: 0.133, a: 1}
-  m_AmbientGroundColor: {r: 0.047, g: 0.043, b: 0.035, a: 1}
+  m_LinearFogStart: 200
+  m_LinearFogEnd: 950
+  m_AmbientSkyColor: {r: 0.48, g: 0.56, b: 0.66, a: 1}
+  m_AmbientEquatorColor: {r: 0.4, g: 0.44, b: 0.44, a: 1}
+  m_AmbientGroundColor: {r: 0.22, g: 0.22, b: 0.18, a: 1}
   m_AmbientIntensity: 1
-  m_AmbientMode: 0
+  m_AmbientMode: 1
   m_SubtractiveShadowColor: {r: 0.42, g: 0.478, b: 0.627, a: 1}
   m_SkyboxMaterial: {fileID: 2100000, guid: efd1c33efd2d58340b88804268e6833f, type: 2}
   m_HaloStrength: 0.5
@@ -1500,8 +1500,8 @@ Light:
   m_Enabled: 1
   serializedVersion: 13
   m_Type: 1
-  m_Color: {r: 1, g: 0.94, b: 0.82, a: 1}
-  m_Intensity: 1.15
+  m_Color: {r: 1, g: 0.94, b: 0.8, a: 1}
+  m_Intensity: 1.25
   m_Range: 10
   m_SpotAngle: 30
   m_InnerSpotAngle: 21.80208
@@ -1510,7 +1510,7 @@ Light:
     m_Type: 2
     m_Resolution: -1
     m_CustomResolution: -1
-    m_Strength: 1
+    m_Strength: 0.62
     m_Bias: 0.05
     m_NormalBias: 0.4
     m_NearPlane: 0.2
@@ -1563,7 +1563,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 705507993}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.40821788, y: -0.23456968, z: 0.10938163, w: 0.8754261}
+  m_LocalRotation: {x: 0.23072504, y: 0.2917736, z: -0.07274733, w: 0.9253875}
   m_LocalPosition: {x: 0, y: 3, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
@@ -1666,6 +1666,7 @@ GameObject:
   - component: {fileID: 823007051}
   - component: {fileID: 823007050}
   - component: {fileID: 823007049}
+  - component: {fileID: 823007053}
   m_Layer: 0
   m_Name: MainGlider
   m_TagString: Player
@@ -1690,6 +1691,11 @@ MonoBehaviour:
   maxTiltAngle: 18
   tiltSpeed: 3
   sensorSensitivity: 2
+  handFullSteerDegrees: 30
+  handDeadzoneDegrees: 2
+  handSign: 1
+  handStaleSeconds: 1
+  handSmoothing: 15
   fullSteerRollDegrees: 25
   steerDeadzoneDegrees: 3
   steerSign: 1
@@ -1779,6 +1785,26 @@ Transform:
   - {fileID: 1255774825}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &823007053
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 823007048}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c459d9bbdc710f94d88608035db8680c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Kinex.HangGlider.GliderWind
+  clipName: wind_loop
+  idleVolume: 0.16
+  fullVolume: 0.42
+  fullSpeed: 12
+  pitchAtIdle: 0.92
+  pitchAtFull: 1.1
+  responsiveness: 2
+  target: {fileID: 0}
 --- !u!1001 &854010063
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -2099,6 +2125,14 @@ MonoBehaviour:
   target: {fileID: 823007052}
   offset: {x: 0, y: 8, z: -26}
   followSmooth: 8
+  baseFov: 60
+  fovPush: 8
+  fovFullSpeed: 12
+  fovSmooth: 2.5
+  bankFollow: 0.18
+  bankSmooth: 4
+  shakeDecay: 3.5
+  shakeAmount: 0.6
 --- !u!114 &963194230
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2123,7 +2157,7 @@ MonoBehaviour:
   m_VolumeTrigger: {fileID: 0}
   m_VolumeFrameworkUpdateModeOption: 2
   m_RenderPostProcessing: 1
-  m_Antialiasing: 2
+  m_Antialiasing: 1
   m_AntialiasingQuality: 2
   m_StopNaN: 0
   m_Dithering: 0

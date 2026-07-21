@@ -25,7 +25,7 @@ namespace Kinex.TheDasher
     /// </summary>
     public class TheDasherDirector : MonoBehaviour
     {
-        enum State { Intro, Framing, Calibrating, Countdown, Play, Results }
+        enum State { Intro, Framing, Calibrating, Tutorial, Countdown, Play, Results }
 
         [Header("Detection")]
         public MediaPipePoseDetector poseDetector;
@@ -175,6 +175,16 @@ namespace Kinex.TheDasher
         State _state = State.Intro;
         bool _calibrated;
         bool _runStarted;
+        bool _tutorialEnabled; // pushed from Flutter (settings toggle) via SceneRouter, read in Start
+        TutorialController _tut;
+        int _tutStep;          // 0 = step/dodge, 1 = sit, 2 = kick
+        bool _tutorialDone;
+        float _tutSuccessTimer; // brief success hold between steps
+        bool _tutCueLive;       // a real cue is currently falling for this step (miss detection)
+        int _tutCueLane;        // lane the current cue is in (dodge = step OFF it; kick = its side)
+        float _tutArm;          // seconds the cue has been up — gates only accept AFTER a short arm
+        bool _tutIntroShown;    // "place a chair" get-ready modal already shown (once per session)
+        bool _tutIntroPending;  // modal is up now — hold step logic until user taps เริ่ม
         bool _manualPaused;
         bool _satThisRep; // a JustStood only counts as a rep if a JustSat preceded it
         float _calibStillTimer;
@@ -326,6 +336,13 @@ namespace Kinex.TheDasher
                 sosTestBtn.onClick.AddListener(() => _sos.Show());
             }
 
+            // Run config pushed from Flutter (difficulty picker + tutorial toggle) via SceneRouter's
+            // static pending values — read once here (SceneRouter persists across the scene load, and
+            // the statics default to normal/tutorial-on so this is safe even when run straight from the
+            // editor with no SceneRouter instance).
+            _tutorialEnabled = Kinex.App.SceneRouter.PendingTutorial;
+            SetDifficulty(ParseDifficulty(Kinex.App.SceneRouter.PendingDifficulty));
+
             // The start/mission screen (logo, subtitle, instruction cards) now lives in Flutter,
             // shown before Unity is even embedded — so introPanel is retired and every entry into
             // this scene goes straight to Framing instead of waiting on OnStartPressed().
@@ -339,6 +356,10 @@ namespace Kinex.TheDasher
         void Update()
         {
             float dt = Time.deltaTime;
+            // SOS fall-detection only runs during actual play — never in framing/countdown/results.
+            // (A false fall there would freeze the game via Time.timeScale=0 — e.g. the 3-2-1
+            // countdown stuck at 3 while the player is still getting into frame.)
+            if (_sos != null) _sos.autoFallDetect = (_state == State.Play && !_manualPaused);
             if (!_manualPaused) TickMotion(dt);
 
             switch (_state)
@@ -346,6 +367,7 @@ namespace Kinex.TheDasher
                 case State.Intro: break;
                 case State.Framing: TickFraming(); break;
                 case State.Calibrating: TickCalibrating(dt); break;
+                case State.Tutorial: TickTutorial(dt); break;
                 case State.Countdown: TickCountdown(dt); break;
                 case State.Play: if (!_manualPaused) TickPlay(dt); break;
                 case State.Results: break;
@@ -379,7 +401,14 @@ namespace Kinex.TheDasher
         void EnterFraming()
         {
             EndSitPose(); // never leave the body frozen in the scripted crouch
+            if (_tut != null) _tut.Hide(); // hide the tutorial card while re-framing (resumes on return)
             _state = State.Framing;
+            // Hide the 3-2-1 countdown when we (re)enter framing — otherwise, if the body is lost
+            // just as the countdown starts, a frozen "3" stays stuck on screen instead of the
+            // framing prompts ("get in frame"). Bug: press เริ่มเลย without the full body visible →
+            // countdown pops but freezes at 3.
+            if (countdownText != null) countdownText.gameObject.SetActive(false);
+            if (countdownBadge != null) countdownBadge.SetActive(false);
             if (framingPanel != null) framingPanel.SetActive(true);
             if (calibGroup != null) calibGroup.SetActive(false);
             if (introPanel != null) introPanel.SetActive(false);
@@ -420,7 +449,7 @@ namespace Kinex.TheDasher
         {
             if (framingPanel != null) framingPanel.SetActive(false);
             Kinex.Sfx.Play("go", 0.6f);
-            if (_calibrated) { EnterCountdown(); return; }
+            if (_calibrated) { ProceedAfterCalibration(); return; }
             _state = State.Calibrating;
             _calibStillTimer = 0f;
             _calibAnchorSet = false;
@@ -462,10 +491,177 @@ namespace Kinex.TheDasher
             _calibrated = true;
             if (calibGroup != null) calibGroup.SetActive(false);
             Kinex.Sfx.Play("checkpoint", 0.7f);
-            EnterCountdown();
+            ProceedAfterCalibration();
         }
 
         // ---- Countdown: 3-2-1 into (or back into) the run. ----
+
+        // ---- Tutorial: teach the 3 core moves in the real scene before the first run. ----
+
+        void ProceedAfterCalibration()
+        {
+            if (_tutorialEnabled && !_tutorialDone) EnterTutorial();
+            else EnterCountdown();
+        }
+
+        void EnterTutorial()
+        {
+            _state = State.Tutorial;
+            if (spawner != null)
+            {
+                spawner.ClearItems(); // fresh scene each entry (also after a body-lost bounce)
+                // Gentle, generous fall while teaching so seniors have plenty of time to react.
+                // ApplyDifficulty() resets this from _baseFallSeconds when the real run begins.
+                spawner.fallSeconds = _baseFallSeconds * 1.6f;
+                spawner.SetPaused(false);
+            }
+            if (_tut == null)
+            {
+                _tut = gameObject.AddComponent<TutorialController>();
+                _tut.OnSkip = FinishTutorial;
+            }
+            // Give the banner the scene's Thai TMP font (same one the toast pill uses).
+            _tut.thaiFont = toastText != null ? toastText.font
+                          : (spawner != null ? spawner.thaiFont : null);
+            _tutSuccessTimer = 0f;
+            _tutCueLive = false;
+            _tutArm = 0f;
+            // First entry: show the "place a chair in the middle of the frame" get-ready modal, and
+            // hold the step logic until the user taps เริ่ม. On a body-lost bounce (already shown),
+            // resume straight at the current step's card.
+            if (!_tutIntroShown)
+            {
+                _tutIntroShown = true;
+                _tutIntroPending = true;
+                _tut.ShowIntro(() =>
+                {
+                    _tutIntroPending = false;
+                    _tut.SetStep(_tutStep);
+                });
+            }
+            else
+            {
+                _tutIntroPending = false;
+                _tut.SetStep(_tutStep); // resume at the current step if we bounced back through framing
+            }
+        }
+
+        void TickTutorial(float dt)
+        {
+            // While the "place a chair" get-ready modal is up, the player is setting up (and may be
+            // out of frame) — don't run gates or bounce on body-loss until they tap เริ่ม.
+            if (_tutIntroPending) return;
+
+            // Lose the body → bounce to framing (same as countdown/play) so the tutorial pauses
+            // cleanly rather than advancing on a phantom pose; it resumes at the same step.
+            if (!useKeyboardStub && _bodyLostTimer > BodyLostSeconds)
+            {
+                HandleBodyLost();
+                if (_state != State.Tutorial) return;
+            }
+
+            // Let the avatar visually RESPOND to the player's motion while teaching — the real
+            // TickPlay (which slides the avatar between lanes and drives the sit crouch) isn't
+            // running yet, so without this the character stays frozen when the player steps aside,
+            // making the dodge feel broken. Reported: "when I move, the character doesn't change lane".
+            TickTutorialAvatar(dt);
+
+            // Brief "สำเร็จ" hold, then move to the next step.
+            if (_tutSuccessTimer > 0f)
+            {
+                _tutSuccessTimer -= dt;
+                if (_tutSuccessTimer <= 0f)
+                {
+                    _tutStep++;
+                    if (_tutStep >= 3) { FinishTutorial(); return; }
+                    _tutCueLive = false;
+                    _tutArm = 0f;
+                    _tut.SetStep(_tutStep);
+                }
+                return;
+            }
+
+            // Keep the REAL prop for this step falling in the scene so the player learns what a
+            // meteor / treasure / kick-ring actually looks like. When the previous one lands or
+            // expires WITHOUT the pose being done, that's a miss → gentle "ลองอีกครั้ง" + respawn.
+            if (spawner != null && spawner.ActiveCount == 0)
+            {
+                if (_tutCueLive)
+                {
+                    ShowToast("ยังไม่ทันนะ ลองอีกครั้ง!", ToastOrange);
+                    _tut.ShowRetry(); // big red "ลองอีกครั้ง!" flash so the miss is unmistakable
+                    Kinex.Sfx.Play("error", 0.5f);
+                }
+                TutorialSpawnCurrentStep();
+                _tutCueLive = true;
+                _tutArm = 0f;
+            }
+            _tutArm += dt;
+
+            // Only accept the pose AFTER the cue has been up a moment: stops a stray/jittery reading
+            // (or an off-centre stance) from instantly "passing" before the player has actually done
+            // anything, and gives seniors a beat to read the card first.
+            bool armed = _tutArm > 0.5f;
+            bool done = armed && _tutStep switch
+            {
+                // Dodge: the meteor targets the player's OWN lane — success = actually stepping OFF it.
+                0 => PlayerLane != _tutCueLane,
+                // Sit: a genuine sit-down.
+                1 => JustSat,
+                // Kick: must kick the leg on the RING'S side (a wrong-leg kick no longer counts).
+                _ => _tutCueLane > 0 ? JustKickedRight : JustKickedLeft,
+            };
+            if (done)
+            {
+                Kinex.Sfx.Play("coin", 0.7f);
+                ShowToast("สำเร็จ! เก่งมาก", ToastGold);
+                _tut.ShowSuccess();
+                _tutSuccessTimer = 0.9f;
+                _tutCueLive = false;
+                if (spawner != null) spawner.ClearItems(); // clear the cue; success flash → next step
+            }
+        }
+
+        // Drive the avatar's VISUALS during the tutorial so the player's move visibly lands
+        // (TickPlay isn't running yet). Slides to the stepped lane + leans, and crouches on a sit.
+        // Counts accrued here (laneSteps etc.) are discarded when the real run starts (EnterPlay).
+        void TickTutorialAvatar(float dt)
+        {
+            if (JustSat) _sitHeld = true;
+            if (JustStood) _sitHeld = false;
+            TickLaneMovement(dt); // lateral slide + lean + sit dip + lane-dot highlight
+            TickSitCrouch();      // scripted knee bend while the sit is held
+        }
+
+        // The real prop for the current tutorial step, recording its lane in _tutCueLane.
+        // Step 0 drops a meteor in the player's CURRENT lane (so "step aside" is a real dodge);
+        // step 1 a treasure ahead to sit for; step 2 a kick-ring on the RIGHT to kick toward.
+        void TutorialSpawnCurrentStep()
+        {
+            switch (_tutStep)
+            {
+                case 0:
+                    _tutCueLane = PlayerLane;
+                    spawner.SpawnOne(DasherKind.Meteor, _tutCueLane);
+                    break;
+                case 1:
+                    _tutCueLane = 0;
+                    spawner.SpawnOne(DasherKind.Treasure, 0);
+                    break;
+                default:
+                    _tutCueLane = 1;
+                    spawner.SpawnOne(DasherKind.KickRing, 1);
+                    break;
+            }
+        }
+
+        void FinishTutorial()
+        {
+            _tutorialDone = true;
+            if (_tut != null) _tut.Hide();
+            if (spawner != null) spawner.ClearItems(); // clear any teaching prop before the real run
+            EnterCountdown(); // straight into the real game (3-2-1 → play)
+        }
 
         void EnterCountdown()
         {
@@ -504,6 +700,12 @@ namespace Kinex.TheDasher
             if (!_runStarted)
             {
                 _runStarted = true;
+                // Discard anything the visuals accrued while teaching (lane steps, a stray sit) so
+                // the real run starts from a clean zero.
+                _result = new DasherResult();
+                _lastLane = 0;
+                _satThisRep = false;
+                UpdateScoreText();
                 ApplyDifficulty(); // tune the spawner BEFORE the deck starts (Easy/Normal/Hard)
                 int seed = deckSeed != 0 ? deckSeed : UnityEngine.Random.Range(1, int.MaxValue);
                 if (spawner != null) spawner.BeginRun(DasherLogic.BuildDeck(seed));
@@ -517,6 +719,12 @@ namespace Kinex.TheDasher
         /// only takes effect on the spawner when the run actually begins (EnterPlay).</summary>
         public void SetDifficulty(DasherDifficulty d) => _difficulty = d;
         public DasherDifficulty CurrentDifficulty => _difficulty;
+        static DasherDifficulty ParseDifficulty(string s) => s switch
+        {
+            "easy" => DasherDifficulty.Easy,
+            "hard" => DasherDifficulty.Hard,
+            _ => DasherDifficulty.Normal,
+        };
 
         // Difficulty → spawner tuning. Scales the DESIGNER'S OWN Inspector numbers (captured in
         // Start) rather than hard-coding duplicates, so Normal is always exactly "whatever the
@@ -530,11 +738,11 @@ namespace Kinex.TheDasher
             switch (_difficulty)
             {
                 case DasherDifficulty.Easy: fallMul = 1.3f; beatMul = 1.05f; windowMul = 1.3f; multiMeteor = 0f; break;
-                case DasherDifficulty.Hard: fallMul = 0.75f; beatMul = 0.72f; windowMul = 0.7f; multiMeteor = 0.55f; break;
-                // Normal is deliberately a notch harder than the raw base numbers (user request):
-                // items fall a bit faster, beats come a little closer, timing windows a touch tighter,
-                // and a meteor beat sometimes storms a second lane (multiMeteor) so it's not one-at-a-time.
-                default /* Normal */:      fallMul = 0.88f; beatMul = 0.8f;  windowMul = 0.88f; multiMeteor = 0.25f; break;
+                case DasherDifficulty.Hard: fallMul = 0.85f; beatMul = 0.55f; windowMul = 0.7f; multiMeteor = 0.65f; break;
+                // Normal keeps the harder CADENCE (beats close together + frequent meteor storms so
+                // the player must step to a safe lane) but the fall SPEED is eased a touch (fallMul
+                // 0.88→1.0) — objects drop a little more gently everywhere per Pokpong's feedback.
+                default /* Normal */:      fallMul = 1.0f;  beatMul = 0.6f;  windowMul = 0.88f; multiMeteor = 0.45f; break;
             }
             spawner.fallSeconds = _baseFallSeconds * fallMul;
             spawner.beatInterval = _baseBeatInterval * beatMul;

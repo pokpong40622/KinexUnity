@@ -15,6 +15,23 @@ public class PlayerMovement : MonoBehaviour
     [Range(1f, 5f)]
     public float sensorSensitivity = 2.0f; // Higher = more sensitive steering
 
+    [Header("Hand-board steering (preferred — the Kinex-Hand MPU6050)")]
+    [Tooltip("Degrees of hand PITCH that map to full left/right steer. The board sends " +
+             "TILT:x,y,z and Flutter forwards y here; positive = steer right.")]
+    public float handFullSteerDegrees = 30f;
+    [Tooltip("Ignore hand tilts smaller than this (deg) so a level hand flies dead straight.")]
+    public float handDeadzoneDegrees = 2f;
+    [Tooltip("Flip to -1 if tilting the hand one way steers the glider the other way.")]
+    public float handSign = 1f;
+    [Tooltip("If no hand sample arrives for this long, fall back to tablet tilt. Without this the " +
+             "last value would stick and keep steering after the board disconnects.")]
+    public float handStaleSeconds = 1f;
+    [Tooltip("Higher = snappier. The board streams at ~30 Hz into a 60 fps game, so the raw value " +
+             "steps visibly; this smooths between samples.")]
+    public float handSmoothing = 15f;
+
+    float _handSteer; // smoothed hand steer, carried between frames
+
     [Header("Landscape steering (rotate the tablet like a steering wheel)")]
     [Tooltip("Degrees of tablet ROLL that map to full left/right steer. Smaller = twitchier, " +
              "bigger = you must tilt more. ~25 is a comfortable wrist roll.")]
@@ -51,9 +68,15 @@ public class PlayerMovement : MonoBehaviour
     private int currentScore = 0;
     private int questionIndex = 0;
     private float _startUnscaledTime; // wall-clock start, for the result payload duration
+    private bool _crashed;            // guard: a crash restart is already in flight
+    Kinex.HangGlider.HangGliderCamera _camera; // for shake kicks; null-checked everywhere
 
     void Start()
     {
+        _camera = Camera.main != null
+            ? Camera.main.GetComponent<Kinex.HangGlider.HangGliderCamera>()
+            : null;
+
         // The new Input System keeps sensors disabled until asked. Enable the
         // accelerometer so tilt steering works on device.
         if (Accelerometer.current != null)
@@ -79,6 +102,8 @@ public class PlayerMovement : MonoBehaviour
         startCanvas.SetActive(false);
         questionCanvas.SetActive(true);
         Time.timeScale = 1;
+        _crashed = false;
+        Kinex.Sfx.Play("go");
         _startUnscaledTime = Time.unscaledTime;
         // Capture "straight ahead" from however the player is holding the tablet right now, so the
         // glider starts level instead of drifting toward one side.
@@ -118,17 +143,42 @@ public class PlayerMovement : MonoBehaviour
             if (kb.dKey.isPressed || kb.rightArrowKey.isPressed) keyboardX += 1f;
         }
 
-        // --- 2. TABLET ROLL (device) ---
-        // Steer by how far the tablet is ROLLED from the neutral captured at StartGame — a delta,
-        // not a raw axis, so there's no constant gravity bias pulling the glider to one side.
-        float sensorX = _lastSteer;
-        if (TryReadRoll(out float roll))
+        // --- 2. STEERING SENSOR ---
+        // Preferred: the Kinex-Hand board. Flutter forwards its pitch here (see
+        // SceneRouter.SetHandTilt). Absolute, not a delta — the board reads pitch straight off
+        // gravity, so "level hand" really is straight ahead with no calibration step.
+        float sensorX;
+        bool handLive = Kinex.App.SceneRouter.HandTiltStamp > 0f &&
+                        Time.unscaledTime - Kinex.App.SceneRouter.HandTiltStamp < handStaleSeconds;
+
+        if (handLive)
         {
-            if (!_rollCalibrated) { _neutralRoll = roll; _rollCalibrated = true; }
-            float delta = Mathf.DeltaAngle(_neutralRoll, roll);
-            if (Mathf.Abs(delta) < steerDeadzoneDegrees) delta = 0f;
-            sensorX = steerSign * Mathf.Clamp(delta / Mathf.Max(fullSteerRollDegrees, 1f), -1f, 1f);
-            _lastSteer = sensorX;
+            float deg = Kinex.App.SceneRouter.HandTiltY;
+            if (Mathf.Abs(deg) < handDeadzoneDegrees) deg = 0f;
+            float target = handSign *
+                Mathf.Clamp(deg / Mathf.Max(handFullSteerDegrees, 1f), -1f, 1f);
+            _handSteer = Mathf.Lerp(_handSteer, target,
+                1f - Mathf.Exp(-handSmoothing * Time.deltaTime));
+            sensorX = _handSteer;
+            // Re-arm the tablet path, so if the board drops out mid-run the fallback recaptures
+            // neutral from however the tablet is being held rather than snapping to a stale one.
+            _rollCalibrated = false;
+        }
+        else
+        {
+            // Fallback: TABLET ROLL. Steer by how far the tablet is ROLLED from the neutral
+            // captured at StartGame — a delta, not a raw axis, so there's no constant gravity bias
+            // pulling the glider to one side.
+            sensorX = _lastSteer;
+            if (TryReadRoll(out float roll))
+            {
+                if (!_rollCalibrated) { _neutralRoll = roll; _rollCalibrated = true; }
+                float delta = Mathf.DeltaAngle(_neutralRoll, roll);
+                if (Mathf.Abs(delta) < steerDeadzoneDegrees) delta = 0f;
+                sensorX = steerSign * Mathf.Clamp(delta / Mathf.Max(fullSteerRollDegrees, 1f), -1f, 1f);
+                _lastSteer = sensorX;
+            }
+            _handSteer = sensorX; // so a returning board eases in from where the tablet left off
         }
 
         // --- 3. COMBINE INPUTS ---
@@ -152,6 +202,7 @@ public class PlayerMovement : MonoBehaviour
 
     void ShowFinalResults()
     {
+        Kinex.Sfx.Play("fanfare");
         Time.timeScale = 0;
         if (gameoverCanvas != null) gameoverCanvas.SetActive(true);
         if (questionCanvas != null) questionCanvas.SetActive(false);
@@ -179,6 +230,13 @@ public class PlayerMovement : MonoBehaviour
             {
                 currentScore += 1;
                 if (scoreText != null) scoreText.text = currentScore.ToString();
+                Kinex.Sfx.Play("correct");
+                if (_camera != null) _camera.Shake(0.25f);
+            }
+            else
+            {
+                Kinex.Sfx.Play("beep", 0.8f, 0.7f); // low, flat buzz — clearly not the correct chime
+                if (_camera != null) _camera.Shake(0.35f);
             }
 
             if (questionIndex < questionGateFolders.Length && questionGateFolders[questionIndex] != null)
@@ -201,9 +259,23 @@ public class PlayerMovement : MonoBehaviour
 
     void OnCollisionEnter(Collision collision)
     {
+        if (_crashed) return; // one crash per run — the restart is already on its way
         if (collision.gameObject.CompareTag("Mountain") || collision.gameObject.name.Contains("mountain"))
         {
-            RestartGame();
+            StartCoroutine(CrashThenRestart());
         }
+    }
+
+    // The original code called RestartGame() the instant you clipped a mountain — no sound, no
+    // reaction, the run just blinked away, which reads as a glitch rather than a crash. Give it a
+    // short beat so the player understands what happened before the scene reloads.
+    System.Collections.IEnumerator CrashThenRestart()
+    {
+        _crashed = true;
+        Kinex.Sfx.Play("hit_1");
+        if (_camera != null) _camera.Shake(1f);
+        // Unscaled: the crash beat must play at the same length no matter what timeScale is doing.
+        yield return new WaitForSecondsRealtime(0.9f);
+        RestartGame();
     }
 }

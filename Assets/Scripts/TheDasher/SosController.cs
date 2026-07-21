@@ -24,9 +24,10 @@ namespace Kinex.TheDasher
         [Tooltip("Seconds the user has to cancel before the emergency contact is auto-dialled.")]
         public float countdownSeconds = 10f;
 
-        [Tooltip("Run automatic fall detection from the pose. OFF = only the score-tap TEST trigger " +
-                 "fires the popup (safe while verifying the call pipeline).")]
-        public bool autoFallDetect = true;
+        [Tooltip("Run automatic fall detection from the pose. Driven by the director — enabled ONLY " +
+                 "during actual play (never framing/countdown/results), so a false fall can't freeze " +
+                 "the game. The score-tap TEST trigger works regardless.")]
+        public bool autoFallDetect = false;
 
         [Tooltip("Pose detector to read the body pose from (set by the director).")]
         public MediaPipePoseDetector poseDetector;

@@ -71,5 +71,41 @@ namespace Kinex.App
         {
             Time.timeScale = (paused == "true" || paused == "1") ? 0f : 1f;
         }
+
+        // ── The Dasher run config ────────────────────────────────────────────────────────────────
+        // Flutter sends these BEFORE LoadGame; the Dasher director reads them in Start(). Static so
+        // the value survives the scene load between this persistent router and the scene's director
+        // (which doesn't exist yet when Flutter sends the config). Single-string, UnitySendMessage-safe.
+        //   sendToUnity("SceneRouter", "SetDifficulty", "easy" | "normal" | "hard")
+        //   sendToUnity("SceneRouter", "SetTutorial",   "true" | "false")
+        public static string PendingDifficulty = "normal";
+        public static bool PendingTutorial = true;
+
+        public void SetDifficulty(string d) =>
+            PendingDifficulty = string.IsNullOrEmpty(d) ? "normal" : d.Trim().ToLowerInvariant();
+
+        public void SetTutorial(string on) => PendingTutorial = (on == "true" || on == "1");
+
+        // ── Hand-board tilt (Hang Glider steering) ───────────────────────────────────────────────
+        // The MPU6050 hand board talks BLE, which only Flutter can speak, so Flutter parses the
+        // board's "TILT:x,y,z" lines and forwards the middle value (y = pitch, +right / -left) here
+        // at ~30 Hz. Static for the same reason as the Dasher config above: this router outlives the
+        // scene load, and the glider that consumes it doesn't exist yet when the stream starts.
+        //   sendToUnity("SceneRouter", "SetHandTilt", "12.7")
+        // Consumers must check HandTiltStamp before trusting HandTiltY — if the board is off or has
+        // dropped out, the last value would otherwise sit here forever and steer the glider into a
+        // wall. See PlayerMovement.handStaleSeconds.
+        public static float HandTiltY;
+        public static float HandTiltStamp;
+
+        public void SetHandTilt(string v)
+        {
+            if (float.TryParse(v, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out float deg))
+            {
+                HandTiltY = deg;
+                HandTiltStamp = Time.unscaledTime;
+            }
+        }
     }
 }
