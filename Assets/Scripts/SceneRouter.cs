@@ -57,6 +57,12 @@ namespace Kinex.App
                 case "hangglider":
                     SceneManager.LoadScene("HangGliderScene");
                     break;
+                case "quakeescape":
+                    // The menu now lives INSIDE the gameplay scene (logo + how-to-play + PLAY/EXIT
+                    // over a live view of the character's face). PLAY rotates that camera into the
+                    // play view — so we load the gameplay scene directly, not a separate menu scene.
+                    SceneManager.LoadScene("QuakeEscapeScene");
+                    break;
                 default:
                     Debug.LogWarning($"[SceneRouter] Unknown game id: '{gameId}'");
                     break;

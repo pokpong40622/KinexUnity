@@ -1693,7 +1693,7 @@ MonoBehaviour:
   sensorSensitivity: 2
   handFullSteerDegrees: 30
   handDeadzoneDegrees: 2
-  handSign: 1
+  handSign: -1
   handStaleSeconds: 1
   handSmoothing: 15
   fullSteerRollDegrees: 25

@@ -22,7 +22,10 @@ public class PlayerMovement : MonoBehaviour
     [Tooltip("Ignore hand tilts smaller than this (deg) so a level hand flies dead straight.")]
     public float handDeadzoneDegrees = 2f;
     [Tooltip("Flip to -1 if tilting the hand one way steers the glider the other way.")]
-    public float handSign = 1f;
+    // -1 because the MPU6050 is mounted upside-down on the hand board, so its
+    // pitch axis reads inverted. Fixing it here rather than in firmware keeps the
+    // board's TILT: output raw and consistent for every other consumer.
+    public float handSign = -1f;
     [Tooltip("If no hand sample arrives for this long, fall back to tablet tilt. Without this the " +
              "last value would stick and keep steering after the board disconnects.")]
     public float handStaleSeconds = 1f;

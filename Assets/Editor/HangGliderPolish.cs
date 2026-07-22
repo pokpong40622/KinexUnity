@@ -21,6 +21,16 @@ namespace Kinex.HangGlider.EditorTools
     ///     off BEFORE fog could hide it — visible pop-in at the horizon.
     ///   • Camera was on SMAA/high, which is a lot of frame time for a Flutter-embedded URP texture.
     ///
+    ///   • Choice3Glass.mat (one of the three answer-gate glass colors, used on exactly one gate
+    ///     per question) was authored as an Opaque Material Variant of Choice2Glass (Surface=0,
+    ///     ZWrite=1, queue 2000) while its siblings Choice1Glass/Choice2Glass are Transparent
+    ///     (Surface=1, ZWrite=0, queue 3000). An opaque, depth-writing gate drawn in the Geometry
+    ///     queue occludes the TMP number sitting just behind its surface, which is rendered later in
+    ///     the Transparent queue — so every gate using this one material shows a blank glass disc
+    ///     with no number. Root cause is this material asset, not the scene layout: every gate's
+    ///     m_text override is present and non-empty. Pre-existing (shipped in 7f542e0, the original
+    ///     Hang Glider merge) — unrelated to this file's lighting/fog/post-FX retune.
+    ///
     /// Idempotent: re-run it freely while tuning. It mutates the existing profile asset in place
     /// rather than recreating it, so the scene's Volume keeps its reference (recreating the asset
     /// would change the GUID and silently unhook the volume).
@@ -29,6 +39,7 @@ namespace Kinex.HangGlider.EditorTools
     {
         const string ScenePath = "Assets/HangGlider/HangGliderScene.unity";
         const string ProfilePath = "Assets/HangGlider/HangGliderPostFX.asset";
+        const string Choice3GlassPath = "Assets/HangGlider/Materials/Glasses/Choice3Glass.mat";
 
         // Late-afternoon alpine light: warm low sun, cool shadow, hazy blue distance.
         static readonly Color SunWarm = new Color(1.00f, 0.94f, 0.80f);
@@ -47,6 +58,7 @@ namespace Kinex.HangGlider.EditorTools
             TuneAtmosphere();
             TuneCamera();
             EnsureWind();
+            FixGateMaterial();
 
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene);
@@ -173,6 +185,44 @@ namespace Kinex.HangGlider.EditorTools
                 data.antialiasing = AntialiasingMode.FastApproximateAntialiasing;
             }
             EditorUtility.SetDirty(go);
+        }
+
+        // ── Gate material (the "missing number" bug) ────────────────────────────────────────────
+
+        /// <summary>
+        /// Choice3Glass was left as an Opaque Material Variant instead of Transparent like
+        /// Choice1Glass/Choice2Glass. Flip it back to match its siblings so it stops writing depth
+        /// over the answer number rendered just behind its surface. Idempotent — setting the same
+        /// values twice is a no-op.
+        /// </summary>
+        static void FixGateMaterial()
+        {
+            var mat = AssetDatabase.LoadAssetAtPath<Material>(Choice3GlassPath);
+            if (mat == null)
+            {
+                Debug.LogError($"[HangGliderPolish] No material at {Choice3GlassPath}");
+                return;
+            }
+
+            mat.SetFloat("_Surface", 1f); // 0 = Opaque, 1 = Transparent
+            // Premultiplied-alpha blend (One, OneMinusSrcAlpha on both RGB and A), exactly matching
+            // Choice1Glass/Choice2Glass's _Blend: 1 (Premultiply) setup — not the plain Alpha preset,
+            // which would use SrcAlpha and double-darken the gate's edges relative to its siblings.
+            mat.SetFloat("_Blend", 1f);
+            mat.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.One);
+            mat.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            mat.SetFloat("_SrcBlendAlpha", (float)UnityEngine.Rendering.BlendMode.One);
+            mat.SetFloat("_DstBlendAlpha", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            mat.SetFloat("_ZWrite", 0f);
+            mat.SetOverrideTag("RenderType", "Transparent");
+            mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            // Matches Choice1Glass/Choice2Glass: a transparent gate doesn't need its own depth or
+            // shadow pass.
+            mat.SetShaderPassEnabled("DepthOnly", false);
+            mat.SetShaderPassEnabled("ShadowCaster", false);
+
+            EditorUtility.SetDirty(mat);
         }
 
         // ── Wind ─────────────────────────────────────────────────────────────────────────────────

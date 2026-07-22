@@ -17,8 +17,11 @@ namespace Kinex.TheDasher
         public System.Action OnSkip;   // director ends the tutorial early
         public TMP_FontAsset thaiFont; // scene's Thai TMP font (skip + success labels)
 
-        // Baked banner height/width ratio — updated whenever build_tut_cards.py re-bakes step*.png.
-        const float CardAspect = 468f / 1412f;
+        // On-screen banner width; the HEIGHT is derived from whatever the baked PNG's real aspect
+        // is (see FitCardToSprite) rather than a hardcoded ratio. A constant here silently goes
+        // stale the moment the cards are re-baked at a different size, which is exactly how the
+        // banner ended up mismatched with its art.
+        const float CardWidth = 1052f;
 
         Canvas _canvas;
         GameObject _root;
@@ -29,6 +32,7 @@ namespace Kinex.TheDasher
         System.Action _onIntroStart;
         float _retryTimer;
         readonly Sprite[] _stepSprites = new Sprite[3];
+        RectTransform _skipRect;
 
         void BuildUi()
         {
@@ -45,13 +49,12 @@ namespace Kinex.TheDasher
 
             // Big instruction banner, pinned to the top edge (baked aspect below). Enlarged so the
             // Thai instruction text reads easily for seniors across the room.
-            float cardW = 1052f, cardH = cardW * CardAspect;
             _card = NewImage("Card", _root.transform, Color.white);
             _card.preserveAspect = true;
             var rt = _card.rectTransform;
             rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 1f);
             rt.pivot = new Vector2(0.5f, 1f);
-            rt.sizeDelta = new Vector2(cardW, cardH);
+            rt.sizeDelta = new Vector2(CardWidth, CardWidth * 0.43f); // provisional; FitCardToSprite corrects it
             rt.anchoredPosition = new Vector2(0f, -26f);
 
             // ข้าม skip — top-right, just under the banner.
@@ -63,7 +66,7 @@ namespace Kinex.TheDasher
             srt.anchorMin = srt.anchorMax = new Vector2(1f, 1f);
             srt.pivot = new Vector2(1f, 1f);
             srt.sizeDelta = new Vector2(150f, 74f);
-            srt.anchoredPosition = new Vector2(-28f, -(cardH + 44f));
+            _skipRect = srt;   // repositioned under the card by FitCardToSprite
             var skipBtn = skip.AddComponent<Button>();
             skipBtn.transition = Selectable.Transition.None;
             skipBtn.onClick.AddListener(() => OnSkip?.Invoke());
@@ -125,6 +128,25 @@ namespace Kinex.TheDasher
             if (_intro != null) _intro.SetActive(false);
             _card.enabled = true; // re-show the banner if the intro modal had hidden it
             _card.sprite = StepSprite(i);
+            FitCardToSprite();
+        }
+
+        /// <summary>
+        /// Sizes the banner to the baked PNG's own aspect and drops the ข้าม button just below it.
+        /// Driven by the sprite so re-baking the cards taller needs no code change.
+        /// </summary>
+        void FitCardToSprite()
+        {
+            if (_card == null || _card.sprite == null) return;
+            var tex = _card.sprite.rect;
+            if (tex.width <= 0f) return;
+
+            float cardH = CardWidth * tex.height / tex.width;
+            _card.rectTransform.sizeDelta = new Vector2(CardWidth, cardH);
+            if (_skipRect != null)
+            {
+                _skipRect.anchoredPosition = new Vector2(-28f, -(cardH + 44f));
+            }
         }
 
         /// <summary>

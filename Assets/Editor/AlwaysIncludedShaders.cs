@@ -18,6 +18,13 @@ namespace Kinex.EditorTools
         {
             "Universal Render Pipeline/Unlit",
             "Universal Render Pipeline/Particles/Unlit",
+            // Quake Escape's ground crack/lava FX (GroundCrackFX) builds materials from these
+            // custom shaders via Shader.Find. They're referenced only by string, so the build
+            // strips them and Shader.Find returns null on device — GroundCrackFX.BuildMeshes then
+            // throws and the collapse floor never renders. Ship them in every build.
+            "Collapse/DepthMask",
+            "Collapse/CrackWall",
+            "Collapse/HeatDistortion",
         };
 
         [MenuItem("Kinex/Setup Always-Included Shaders")]

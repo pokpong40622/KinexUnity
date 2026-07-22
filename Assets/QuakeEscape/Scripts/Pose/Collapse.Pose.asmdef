@@ -1,0 +1,17 @@
+{
+    "name": "Collapse.Pose",
+    "rootNamespace": "Collapse",
+    "references": [
+        "Unity.InputSystem",
+        "Mediapipe.Runtime"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
