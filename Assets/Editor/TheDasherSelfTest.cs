@@ -52,8 +52,9 @@ namespace Kinex.TheDasher.EditorTools
 
         static void TestDeck()
         {
-            bool countsOk = true, firstOk = true, pairsOk = true, lanesOk = true;
-            for (int seed = 1; seed <= 50 && (countsOk && firstOk && pairsOk && lanesOk); seed++)
+            bool countsOk = true, firstOk = true, spreadOk = true, lanesOk = true;
+            string spreadDetail = "";
+            for (int seed = 1; seed <= 200; seed++)
             {
                 var deck = DasherLogic.BuildDeck(seed);
                 if (deck.Length != DasherLogic.BeatCount) { countsOk = false; break; }
@@ -64,13 +65,20 @@ namespace Kinex.TheDasher.EditorTools
                 countsOk &= meteors == DasherLogic.MeteorCount && treasures == DasherLogic.TreasureCount &&
                             kicks == DasherLogic.KickCount && rests == DasherLogic.RestCount;
                 firstOk &= deck[0].kind == DasherKind.Treasure;
+                // The spread property: no beat repeats the previous beat's kind. Strictly stronger
+                // than the old "never two meteors back-to-back" rule, and it is what stops the game
+                // feeling like "one pose all the time".
                 for (int i = 1; i < deck.Length; i++)
-                    if (deck[i].kind == DasherKind.Meteor && deck[i - 1].kind == DasherKind.Meteor) pairsOk = false;
+                    if (deck[i].kind == deck[i - 1].kind)
+                    {
+                        spreadOk = false;
+                        if (spreadDetail == "") spreadDetail = $"seed {seed}, beat {i} = {deck[i].kind}";
+                    }
                 lanesOk &= deck.All(b => b.lane >= -1 && b.lane <= 1);
             }
-            Check(countsOk, "deck: exact dose counts (8 meteor / 8 treasure / 7 kick / 5 rest), 50 seeds");
+            Check(countsOk, "deck: exact dose counts (8 meteor / 8 treasure / 7 kick / 5 rest), 200 seeds");
             Check(firstOk, "deck: always opens with a treasure");
-            Check(pairsOk, "deck: never two meteors back-to-back");
+            Check(spreadOk, "deck: even spread — no two adjacent beats share a kind", spreadDetail);
             Check(lanesOk, "deck: lanes within -1..1");
 
             var a = DasherLogic.BuildDeck(7);
@@ -79,6 +87,13 @@ namespace Kinex.TheDasher.EditorTools
             for (int i = 0; same && i < a.Length; i++)
                 same = a[i].kind == b[i].kind && a[i].lane == b[i].lane;
             Check(same, "deck: deterministic for a fixed seed");
+
+            // ...but still genuinely random: a different seed must produce a different deck (guards
+            // against the no-repeat deal degenerating into a fixed rotation).
+            var c = DasherLogic.BuildDeck(8);
+            bool differs = false;
+            for (int i = 0; i < a.Length && !differs; i++) differs = a[i].kind != c[i].kind;
+            Check(differs, "deck: a different seed gives a different deck");
         }
 
         static void TestKickRules()

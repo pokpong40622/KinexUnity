@@ -15,7 +15,8 @@ namespace Collapse
         Warning,
         Gap,
         Victory,
-        GameOver
+        GameOver,
+        Demo // demo slice finished (Flutter quick tour) — idle terminal state, no results flow
     }
 
     public enum WarningSide
@@ -72,6 +73,25 @@ namespace Collapse
 
         private Coroutine mainLoopRoutine;
 
+        // Demo mode (Flutter quick tour): a short scripted slice instead of the endless MainLoop —
+        // see SceneRouter.PendingDemoBeats, DemoLoop and EmitDemoPose below.
+        private bool demoMode;
+        private int demoTotal;
+        private int demoResolved;
+        private int demoPassed;
+
+        // Demo pacing. The demo is a GUIDED tour, not a survival round: instead of MainLoop's
+        // "you fail the moment you are in the wrong pose", the player gets a long window in which
+        // reaching the required pose and holding it briefly is a pass, and running out is a skip.
+        private const float DemoAttemptSeconds = 20f;
+        private const float DemoHoldSeconds = 1.5f;
+        private const float DemoPoseWaitSeconds = 10f;
+
+        // The pose pipeline is actually tracking a body. Without waiting on this the first challenge
+        // failed instantly: DasherPoseSource reports PoseState.None until it has landmarks, and the
+        // old demo gap treated "not the required pose" as an immediate fail.
+        private bool DemoPoseReady => armSource == null || armSource.IsTracking;
+
         private void Awake()
         {
             Instance = this;
@@ -97,6 +117,12 @@ namespace Collapse
 
             Hearts = maxHearts;
             RemainingTime = totalTime;
+
+            // Demo mode pushed from Flutter via SceneRouter's static pending value — consumed and
+            // reset immediately so a normal run started afterwards isn't accidentally a demo.
+            demoTotal = Kinex.App.SceneRouter.PendingDemoBeats;
+            Kinex.App.SceneRouter.PendingDemoBeats = 0;
+            demoMode = demoTotal > 0;
 
             // The in-scene menu now shows the character's face first and calls StartFromReady()
             // when the player presses PLAY (autoStart=false). If there is no menu (autoStart=true),
@@ -227,7 +253,7 @@ namespace Collapse
             PhaseTimeLeft = 0f;
 
             RemainingTime = totalTime;
-            mainLoopRoutine = StartCoroutine(MainLoop());
+            mainLoopRoutine = StartCoroutine(demoMode ? DemoLoop() : MainLoop());
         }
 
         private IEnumerator MainLoop()
@@ -436,6 +462,117 @@ namespace Collapse
                     yield return new WaitForSeconds(1f);
                 }
             }
+        }
+
+        // ---- Demo mode: a short scripted slice instead of MainLoop's endless cycle. ----
+
+        // Demo slice = one one-leg-stand challenge, then one tiptoe challenge (repeats that pair if
+        // Flutter ever asks for more than 2 beats). Reuses the SAME Warning/Gap mechanics — floor
+        // collapse, grace window, ApplyPoseToCharacter — as the real game, just without
+        // hearts/RemainingTime/game-over: each result is reported to Flutter instead.
+        private IEnumerator DemoLoop()
+        {
+            if (player != null)
+            {
+                player.ResetToCenter();
+            }
+
+            // Don't open the first challenge until the camera pipeline is actually seeing someone.
+            // Capped so a camera fault reports skipped beats instead of hanging the tour.
+            float waited = 0f;
+            while (waited < DemoPoseWaitSeconds && !DemoPoseReady)
+            {
+                waited += Time.deltaTime;
+                yield return null;
+            }
+
+            for (int i = 0; i < demoTotal; i++)
+            {
+                yield return RunDemoChallenge(i % 2 == 1);
+            }
+
+            Phase = GamePhase.Demo; // idle terminal state — Update()'s switch has no case for it
+            // `completed` = challenges the player PASSED (matches TheDasherDirector.EndDemoRun).
+            SendToFlutter.Send("{\"type\":\"demo_done\",\"game\":\"quakeescape\",\"completed\":" +
+                                demoPassed + ",\"total\":" + demoTotal + "}");
+        }
+
+        // One demo challenge: tiptoe=false is a one-leg-stand (right leg raised, left floor
+        // collapses); tiptoe=true collapses both floors and requires PoseState.Tiptoe.
+        private IEnumerator RunDemoChallenge(bool tiptoe)
+        {
+            PoseState requiredPose = tiptoe ? PoseState.Tiptoe : PoseState.OneLegRight;
+
+            Phase = GamePhase.Warning;
+            Prompt = tiptoe ? "เขย่งปลายเท้า ค้างไว้!" : "ยกขาขวาขึ้น ค้างไว้!";
+            CurrentWarning = tiptoe ? WarningSide.Both : WarningSide.Left;
+            if (leftFloor != null) leftFloor.BeginWarning();
+            if (tiptoe && rightFloor != null) rightFloor.BeginWarning();
+
+            float warnTimer = warnDuration;
+            while (warnTimer > 0f)
+            {
+                PhaseTimeLeft = warnTimer;
+                ApplyPoseToCharacter(tiptoe);
+                warnTimer -= Time.deltaTime;
+                yield return null;
+            }
+            PhaseTimeLeft = 0f;
+
+            Phase = GamePhase.Gap;
+            if (leftFloor != null) leftFloor.Collapse();
+            if (tiptoe && rightFloor != null) rightFloor.Collapse();
+
+            // Attempt window, the INVERSE of MainLoop's gap: hold the required pose for
+            // DemoHoldSeconds at any point and the challenge is passed; run out of window and it is
+            // skipped. Never an instant fail — the old "wrongTime > graceWindow" test failed on the
+            // very first frame, before the player had even seen the prompt.
+            float held = 0f;
+            float attempt = DemoAttemptSeconds;
+            bool ok = false;
+            while (attempt > 0f)
+            {
+                PhaseTimeLeft = attempt;
+                ApplyPoseToCharacter(tiptoe);
+
+                PoseState currentPose = poseSource != null ? poseSource.CurrentPose : PoseState.None;
+                held = currentPose == requiredPose ? held + Time.deltaTime : 0f;
+                if (held >= DemoHoldSeconds)
+                {
+                    ok = true;
+                    break;
+                }
+
+                attempt -= Time.deltaTime;
+                yield return null;
+            }
+            PhaseTimeLeft = 0f;
+
+            if (!ok && player != null)
+            {
+                player.Fall();
+            }
+            if (leftFloor != null) leftFloor.Rebuild();
+            if (tiptoe && rightFloor != null) rightFloor.Rebuild();
+            if (ok && player != null)
+            {
+                player.StopHang();
+                player.ResetToCenter();
+            }
+
+            EmitDemoPose(ok);
+            yield return new WaitForSeconds(1f); // brief settle before the next challenge
+        }
+
+        // Reports one resolved demo challenge to Flutter. See SceneRouter.PendingDemoBeats for the
+        // contract.
+        private void EmitDemoPose(bool ok)
+        {
+            int index = demoResolved;
+            demoResolved++;
+            if (ok) demoPassed++;
+            SendToFlutter.Send("{\"type\":\"demo_pose\",\"game\":\"quakeescape\",\"index\":" + index +
+                                ",\"ok\":" + (ok ? "true" : "false") + "}");
         }
 
         private void ApplyPoseToCharacter(bool bothEvent)

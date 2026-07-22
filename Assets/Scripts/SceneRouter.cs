@@ -92,6 +92,30 @@ namespace Kinex.App
 
         public void SetTutorial(string on) => PendingTutorial = (on == "true" || on == "1");
 
+        // ── Demo mode (Flutter quick tour) ──────────────────────────────────────────────────────
+        // Flutter sends this BEFORE LoadGame to run a SHORT scripted slice of a game instead of the
+        // normal session, then reports each scripted beat/pose back via SendToFlutter.Send as
+        // {"type":"demo_pose",...} and finishes with {"type":"demo_done",...}. 0 = normal play.
+        // Static for the same cross-scene-load reason as PendingDifficulty/PendingTutorial above.
+        // Each director MUST reset this to 0 once consumed in Start(), exactly like the pending
+        // values above, so a normal game launched afterwards doesn't accidentally run as a demo.
+        //   sendToUnity("SceneRouter", "SetDemo", "3")   // 0 = normal mode
+        public static int PendingDemoBeats = 0;
+
+        public void SetDemo(string n) =>
+            PendingDemoBeats = int.TryParse(n, out int v) && v > 0 ? v : 0;
+
+        // ── Coach mode (เรียนรู้ท่าฝึก live practice) ─────────────────────────────────────────────
+        // Flutter sends this BEFORE LoadGame("motionlab") to turn the Motion Lab mirror into a live
+        // coach for ONE exercise instead of the free test range. Empty = normal Motion Lab.
+        // Static for the same cross-scene-load reason as PendingDifficulty above; MotionLabDirector
+        // consumes AND clears it in Start() so a later normal run is never accidentally coached.
+        //   sendToUnity("SceneRouter", "SetCoach", "hip_abduction")
+        public static string PendingCoachPose = "";
+
+        public void SetCoach(string poseId) =>
+            PendingCoachPose = string.IsNullOrEmpty(poseId) ? "" : poseId.Trim().ToLowerInvariant();
+
         // ── Hand-board tilt (Hang Glider steering) ───────────────────────────────────────────────
         // The MPU6050 hand board talks BLE, which only Flutter can speak, so Flutter parses the
         // board's "TILT:x,y,z" lines and forwards the middle value (y = pitch, +right / -left) here

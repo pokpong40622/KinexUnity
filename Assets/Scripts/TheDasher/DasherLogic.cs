@@ -85,49 +85,76 @@ namespace Kinex.TheDasher
 
         /// <summary>
         /// Deterministic session deck (seeded — the self-test replays exact decks).
-        /// Rules: opens with a treasure (teach the friendliest mechanic first), never two
-        /// meteors back-to-back, lanes vary (no 3 identical lanes in a row), kick rings
-        /// use all three lanes.
+        /// Rules: opens with a treasure (teach the friendliest mechanic first), NO two
+        /// adjacent beats of the same kind (a true shuffle of 8/8/7/5 routinely produced
+        /// three of a kind in a row, which players read as "the same pose over and over"),
+        /// lanes vary (no 3 identical lanes in a row), kick rings use all three lanes.
         /// </summary>
         public static Beat[] BuildDeck(int seed)
         {
             var rng = new System.Random(seed);
 
-            // Bag of kinds at exact dose counts.
-            var kinds = new DasherKind[BeatCount];
-            int n = 0;
-            for (int i = 0; i < MeteorCount; i++) kinds[n++] = DasherKind.Meteor;
-            for (int i = 0; i < TreasureCount; i++) kinds[n++] = DasherKind.Treasure;
-            for (int i = 0; i < KickCount; i++) kinds[n++] = DasherKind.KickRing;
-            for (int i = 0; i < RestCount; i++) kinds[n++] = DasherKind.Rest;
+            // Deal slot by slot instead of shuffling-and-rejecting: at each beat, pick among the
+            // kinds that still have dose left AND differ from the previous beat, weighted by how
+            // much dose each has left. Weighting keeps the heavier kinds spread across the whole
+            // session (a plain uniform pick would exhaust the light kinds early and leave a tail of
+            // the heavy one), and the "differ from previous" filter makes the even spread structural
+            // rather than something we rejection-sample for.
+            var remain = new int[4]; // indexed by (int)DasherKind
+            remain[(int)DasherKind.Meteor] = MeteorCount;
+            remain[(int)DasherKind.Treasure] = TreasureCount;
+            remain[(int)DasherKind.KickRing] = KickCount;
+            remain[(int)DasherKind.Rest] = RestCount;
 
-            // Rejection-sample a shuffle satisfying both constraints (treasure first, no
-            // adjacent meteors). A local swap repair can CREATE a new meteor pair at the
-            // swap destination — the self-test caught exactly that — so re-shuffling until
-            // clean is the simple correct approach. Deterministic per seed; with 8 meteors
-            // in 28 beats a clean shuffle shows up within a handful of attempts.
-            for (int attempt = 0; attempt < 200; attempt++)
+            var kinds = new DasherKind[BeatCount];
+            kinds[0] = DasherKind.Treasure; // beat 0 is always a treasure
+            remain[(int)DasherKind.Treasure]--;
+            int prev = (int)DasherKind.Treasure;
+
+            for (int i = 1; i < BeatCount; i++)
             {
-                for (int i = BeatCount - 1; i > 0; i--)
+                int slotsAfter = BeatCount - i - 1;
+
+                // Only consider picks that still leave the REST of the deck arrangeable — otherwise
+                // naive no-repeat dealing paints itself into a corner (e.g. 3 treasures and nothing
+                // else left, forcing T,T,T at the end).
+                int totalWeight = 0;
+                for (int k = 0; k < 4; k++)
                 {
-                    int j = rng.Next(i + 1);
-                    (kinds[i], kinds[j]) = (kinds[j], kinds[i]);
+                    if (k == prev || remain[k] == 0) continue;
+                    remain[k]--;
+                    bool ok = Arrangeable(remain, slotsAfter, k);
+                    remain[k]++;
+                    if (ok) totalWeight += remain[k];
                 }
 
-                // Beat 0 is always a treasure: swap the first treasure forward.
-                for (int i = 0; i < BeatCount; i++)
-                    if (kinds[i] == DasherKind.Treasure) { (kinds[0], kinds[i]) = (kinds[i], kinds[0]); break; }
+                int pick = -1;
+                if (totalWeight > 0)
+                {
+                    int roll = rng.Next(totalWeight);
+                    for (int k = 0; k < 4; k++)
+                    {
+                        if (k == prev || remain[k] == 0) continue;
+                        remain[k]--;
+                        bool ok = Arrangeable(remain, slotsAfter, k);
+                        remain[k]++;
+                        if (!ok) continue;
+                        roll -= remain[k];
+                        if (roll < 0) { pick = k; break; }
+                    }
+                }
 
-                bool pairFound = false;
-                for (int i = 1; i < BeatCount && !pairFound; i++)
-                    pairFound = kinds[i] == DasherKind.Meteor && kinds[i - 1] == DasherKind.Meteor;
-                if (!pairFound) break;
+                // Endgame fallbacks. Unreachable with the shipping doses (Arrangeable guarantees a
+                // legal pick exists), but if the counts are ever retuned into an impossible shape we
+                // keep the EXACT dose counts and give up the no-repeat rule rather than loop forever.
+                if (pick < 0)
+                    for (int k = 0; k < 4 && pick < 0; k++) if (k != prev && remain[k] > 0) pick = k;
+                if (pick < 0)
+                    for (int k = 0; k < 4 && pick < 0; k++) if (remain[k] > 0) pick = k;
 
-                // With 8 meteors in 28 beats a clean shuffle appears within a handful of tries;
-                // exhausting 200 is effectively impossible, but warn rather than silently ship a
-                // deck with an adjacent-meteor pair.
-                if (attempt == 199)
-                    UnityEngine.Debug.LogWarning("[DasherLogic] deck shuffle hit attempt cap with an adjacent-meteor pair.");
+                kinds[i] = (DasherKind)pick;
+                remain[pick]--;
+                prev = pick;
             }
 
             // Assign lanes: avoid 3 repeats in a row so the player keeps stepping.
@@ -152,6 +179,22 @@ namespace Kinex.TheDasher
                 prevLane = lane;
             }
             return deck;
+        }
+
+        /// <summary>
+        /// Can the remaining dose in <paramref name="remain"/> still fill <paramref name="slots"/>
+        /// beats with no two adjacent alike, given the beat just placed was <paramref name="prev"/>?
+        /// A kind can only occupy every other slot, so it fits iff its count is within
+        /// ceil(slots/2) — or floor(slots/2) for `prev`, which cannot take the very next slot.
+        /// </summary>
+        static bool Arrangeable(int[] remain, int slots, int prev)
+        {
+            for (int k = 0; k < remain.Length; k++)
+            {
+                int cap = k == prev ? slots / 2 : (slots + 1) / 2;
+                if (remain[k] > cap) return false;
+            }
+            return true;
         }
     }
 }

@@ -187,6 +187,16 @@ namespace Kinex.TheDasher
         bool _calibrated;
         bool _runStarted;
         bool _tutorialEnabled; // pushed from Flutter (settings toggle) via SceneRouter, read in Start
+        bool _demoMode;        // Flutter quick-tour slice (SceneRouter.PendingDemoBeats), read in Start
+        int _demoTotal;        // beats in the demo slice
+        int _demoResolved;     // demo beats resolved so far — next demo_pose index
+        int _demoPassed;       // of those, how many the player actually PASSED (demo_done.completed)
+        // The demo is self-paced: DemoRunRoutine spawns ONE item per beat and waits for it. This flag
+        // is the "beat already reported" guard — a single beat can reach EmitDemoBeat twice (a kicked
+        // ring also expires; a claimed treasure also expires), which used to burn two of the three
+        // demo beats on one bit of gameplay and finish the tour early. Starts true so nothing can be
+        // reported before the routine opens the first beat.
+        bool _demoBeatResolved = true;
         TutorialController _tut;
         int _tutStep;          // 0 = step/dodge, 1 = sit, 2 = kick
         bool _tutorialDone;
@@ -344,6 +354,9 @@ namespace Kinex.TheDasher
             // ship without a debug trigger.
             if (timerText != null)
             {
+                // TheDasherUIBuilder.AddText() builds every label with raycastTarget off, so the
+                // Button below would never see the tap without turning it back on for this one.
+                timerText.raycastTarget = true;
                 var sosTestBtn = timerText.gameObject.GetComponent<Button>();
                 if (sosTestBtn == null) sosTestBtn = timerText.gameObject.AddComponent<Button>();
                 sosTestBtn.transition = Selectable.Transition.None;
@@ -356,6 +369,13 @@ namespace Kinex.TheDasher
             // editor with no SceneRouter instance).
             _tutorialEnabled = Kinex.App.SceneRouter.PendingTutorial;
             SetDifficulty(ParseDifficulty(Kinex.App.SceneRouter.PendingDifficulty));
+
+            // Demo mode (Flutter quick tour): a short scripted slice instead of the normal 3-minute
+            // session — see SceneRouter.PendingDemoBeats and EmitDemoBeat/EndDemoRun below. Consume
+            // and reset immediately so a normal run started afterwards isn't accidentally a demo.
+            _demoTotal = Kinex.App.SceneRouter.PendingDemoBeats;
+            Kinex.App.SceneRouter.PendingDemoBeats = 0;
+            _demoMode = _demoTotal > 0;
 
             // The start/mission screen (logo, subtitle, instruction cards) now lives in Flutter,
             // shown before Unity is even embedded — so introPanel is retired and every entry into
@@ -514,6 +534,7 @@ namespace Kinex.TheDasher
 
         void ProceedAfterCalibration()
         {
+            if (_demoMode) { EnterCountdown(); return; } // demo mode: never the tutorial
             if (_tutorialEnabled && !_tutorialDone) EnterTutorial();
             else EnterCountdown();
         }
@@ -725,9 +746,20 @@ namespace Kinex.TheDasher
                 _lastLane = 0;
                 _satThisRep = false;
                 UpdateScoreText();
-                ApplyDifficulty(); // tune the spawner BEFORE the deck starts (Easy/Normal/Hard)
-                int seed = deckSeed != 0 ? deckSeed : UnityEngine.Random.Range(1, int.MaxValue);
-                if (spawner != null) spawner.BeginRun(DasherLogic.BuildDeck(seed));
+                if (_demoMode)
+                {
+                    // Demo mode drives its OWN beat clock (DemoRunRoutine) — deliberately NOT
+                    // spawner.BeginRun, which would run the normal deck schedule and resolve every
+                    // beat on the clock whether or not the player did anything.
+                    ApplyDemoTuning();
+                    StartCoroutine(DemoRunRoutine());
+                }
+                else
+                {
+                    ApplyDifficulty(); // tune the spawner BEFORE the deck starts (Easy/Normal/Hard)
+                    int seed = deckSeed != 0 ? deckSeed : UnityEngine.Random.Range(1, int.MaxValue);
+                    if (spawner != null) spawner.BeginRun(DasherLogic.BuildDeck(seed));
+                }
             }
             else if (spawner != null) spawner.SetPaused(false);
         }
@@ -770,6 +802,125 @@ namespace Kinex.TheDasher
             spawner.multiMeteorChance = multiMeteor;
         }
 
+        // Demo tuning: EASIER than Easy. A judge trying the quick tour for the first time gets a very
+        // slow meteor (plenty of time to notice it and step aside) and roughly double-length treasure
+        // and kick windows. beatInterval is irrelevant here — DemoRunRoutine paces the beats itself.
+        void ApplyDemoTuning()
+        {
+            if (spawner == null) return;
+            spawner.fallSeconds = _baseFallSeconds * 1.8f;
+            spawner.treasureWindowSeconds = _baseTreasureWindow * 2f;
+            spawner.ringWindowSeconds = _baseRingWindow * 2f;
+            spawner.multiMeteorChance = 0f; // never two meteors at once during the tour
+        }
+
+        // Demo mode: a SHORT fixed slice for Flutter's quick tour (SceneRouter.PendingDemoBeats),
+        // instead of DasherLogic.BuildDeck's randomised 28-beat session. Cycles Meteor/Treasure/
+        // KickRing — the 3 scored kinds, never Rest — for exactly `count` beats. Same lanes the
+        // tutorial teaches with (see TutorialSpawnCurrentStep), so the demo shows a real dodge, a
+        // real treasure grab and a real kick.
+        static DasherLogic.Beat[] BuildDemoDeck(int count)
+        {
+            var kinds = new[] { DasherKind.Meteor, DasherKind.Treasure, DasherKind.KickRing };
+            var deck = new DasherLogic.Beat[count];
+            for (int i = 0; i < count; i++)
+            {
+                var kind = kinds[i % kinds.Length];
+                int lane = kind switch { DasherKind.Meteor => -1, DasherKind.Treasure => 0, _ => 1 };
+                deck[i] = new DasherLogic.Beat { kind = kind, lane = lane };
+            }
+            return deck;
+        }
+
+        // ---- Demo run: one beat at a time, each waiting for the player. ----
+
+        const float DemoBodyWaitSeconds = 10f;   // cap on "waiting for the player to appear"
+        const float DemoBeatTimeoutSeconds = 25f; // cap on "waiting for this beat to resolve"
+        const float DemoSettleSeconds = 1.5f;     // breather between beats
+
+        // The player is actually there RIGHT NOW — the same signal that feeds _bodyLostTimer in
+        // TickMotion (and therefore the BodyLostSeconds / HandleBodyLost bounce), not a second
+        // detection path.
+        bool DemoBodyReady => useKeyboardStub || (HasLivePose && BodyPresentForPlay);
+
+        // True only while the run is genuinely live — the demo's own timers stop while the player is
+        // bounced to the framing screen or has the pause panel up, so a body-loss can't silently eat
+        // a beat's whole 25 s window.
+        bool DemoClockRunning => _state == State.Play && !_manualPaused;
+
+        static string DemoPromptFor(DasherKind kind) => kind switch
+        {
+            DasherKind.Meteor => "ก้าวหลบอุกกาบาต!",
+            DasherKind.Treasure => "นั่งลงเก็บสมบัติ!",
+            _ => "เตะห่วงด้านข้าง!",
+        };
+
+        /// <summary>
+        /// The quick tour, self-paced. BuildDemoDeck still says WHAT each beat is; this only
+        /// sequences it: wait for the player → drop exactly one item → wait for the EXISTING
+        /// resolution paths (OnItemArrived / TickKicks / the treasure claim in TickSitStand) to score
+        /// it → report one demo_pose → breathe. No scoring logic is duplicated here.
+        /// </summary>
+        System.Collections.IEnumerator DemoRunRoutine()
+        {
+            var deck = BuildDemoDeck(_demoTotal);
+            for (int i = 0; i < deck.Length; i++)
+            {
+                _demoBeatResolved = false;
+                if (spawner != null) spawner.ClearItems(); // FadeAway, so no stale Expired events
+                ShowToast(DemoPromptFor(deck[i].kind), ToastCyan);
+
+                // 1. Wait for a tracked body. Capped so a camera fault reports a skipped beat
+                //    instead of hanging the tour forever.
+                float waited = 0f;
+                while (waited < DemoBodyWaitSeconds && !DemoBodyReady)
+                {
+                    if (DemoClockRunning) waited += Time.deltaTime;
+                    yield return null;
+                }
+                if (!DemoBodyReady)
+                {
+                    EmitDemoBeat(false);
+                    yield return new WaitForSeconds(DemoSettleSeconds);
+                    continue;
+                }
+
+                // 2. Exactly ONE item for this beat.
+                if (spawner != null) spawner.SpawnOne(deck[i].kind, DemoLaneFor(deck[i]));
+
+                // 3. Wait for it to resolve through the normal paths.
+                float t = 0f;
+                while (!_demoBeatResolved && t < DemoBeatTimeoutSeconds)
+                {
+                    if (DemoClockRunning) t += Time.deltaTime;
+                    yield return null;
+                }
+                if (!_demoBeatResolved) EmitDemoBeat(false); // 4. exactly one demo_pose per beat
+
+                yield return new WaitForSeconds(DemoSettleSeconds); // 5. settle
+            }
+            EndDemoRun();
+        }
+
+        // Where a demo beat's item goes. The deck's kinds are authoritative; the LANE is placed
+        // relative to where the player is standing right now so the beat is actually a demo of the
+        // pose (same idea as TutorialSpawnCurrentStep):
+        //  - meteor into the player's OWN lane, so dodging means genuinely stepping aside (a meteor
+        //    in a fixed lane would score a free "dodge" for a player who never moved),
+        //  - treasure always centre (the chair is fixed at the middle lane),
+        //  - kick ring into an ADJACENT lane, so it can be kicked (standing in a ring's own lane is
+        //    the foul, i.e. an instant fail the player never had a chance at).
+        int DemoLaneFor(DasherLogic.Beat beat)
+        {
+            int lane = PlayerLane;
+            return beat.kind switch
+            {
+                DasherKind.Meteor => lane,
+                DasherKind.Treasure => 0,
+                _ => lane <= 0 ? lane + 1 : lane - 1,
+            };
+        }
+
         // ---- Play: the 3-minute run. ----
 
         void TickPlay(float dt)
@@ -781,9 +932,14 @@ namespace Kinex.TheDasher
                 if (_state != State.Play) return; // bounced to Framing
             }
 
-            _timeLeft -= dt;
-            UpdateTimerText();
-            if (_timeLeft <= 0f) { EndRun(); return; }
+            // The demo slice is paced by DemoRunRoutine and ends via EndDemoRun — the 3-minute
+            // session clock (and the normal results screen it triggers) has no part in it.
+            if (!_demoMode)
+            {
+                _timeLeft -= dt;
+                UpdateTimerText();
+                if (_timeLeft <= 0f) { EndRun(); return; }
+            }
 
             TickLaneMovement(dt);
             TickSitStand();
@@ -856,6 +1012,7 @@ namespace Kinex.TheDasher
                     ShowScorePop(+1);
                     ShowToast("+1 เก็บสมบัติ!", ToastGold);
                     Kinex.Sfx.Play("coin", 0.8f);
+                    EmitDemoBeat(true);
                 }
             }
 
@@ -974,6 +1131,7 @@ namespace Kinex.TheDasher
                 ShowScorePop(+1);
                 ShowToast("เตะโดน! +1", ToastCyan);
                 Kinex.Sfx.Play("whoosh", 0.7f);
+                EmitDemoBeat(true);
             }
         }
 
@@ -999,12 +1157,14 @@ namespace Kinex.TheDasher
                             KinexFx.PopBurst(avatarRoot.position + Vector3.up * 0.6f, new Color(0.35f, 0.35f, 0.4f), 16);
                         }
                         StartCoroutine(DamageFlash());
+                        EmitDemoBeat(false);
                     }
                     else
                     {
                         _result.dodges++;
                         ShowFeedback(feedbackSafe); // picture popup "ปลอดภัย!"
                         Kinex.Sfx.Play("dodge", 0.5f);
+                        EmitDemoBeat(true);
                     }
                     break;
 
@@ -1021,6 +1181,7 @@ namespace Kinex.TheDasher
                         ShowToast("−1 ยืนทับวงเตะ! ขยับไปเลนข้าง ๆ", ToastOrange);
                         Kinex.Sfx.Play("hit_2", 0.6f);
                         item.FadeAway();
+                        EmitDemoBeat(false);
                     }
                     break;
             }
@@ -1033,6 +1194,9 @@ namespace Kinex.TheDasher
             // Active at once in different lanes (beat 6.2s < fall 4s + window 7s), and a treasure
             // leaving a lane you're NOT working shouldn't knock the tool out of your hand.
             if (item.Kind == DasherKind.Treasure && _tool != null && item.Lane == PlayerLane) DropTool();
+            // Demo mode: an unclaimed treasure or an un-kicked ring is that beat's failure outcome.
+            // (Meteors never reach this — they resolve at impact in OnItemArrived, window = 0.)
+            if (item.Kind == DasherKind.Treasure || item.Kind == DasherKind.KickRing) EmitDemoBeat(false);
         }
 
         // Cached runtime Vignette from the global post-processing volume, pulsed red on a hit.
@@ -1119,6 +1283,43 @@ namespace Kinex.TheDasher
                 tool.transform.Rotate(Vector3.right, 240f * Time.deltaTime);
             }, this);
             Destroy(tool, 1.6f);
+        }
+
+        // ---- Demo mode: report each resolved beat, finish without the normal results flow. ----
+
+        // Called from the SAME resolution points normal scoring uses (meteor hit/dodge in
+        // OnItemArrived, treasure claim in TickSitStand / expiry in OnItemExpired, kick hit in
+        // TickKicks / foul in OnItemArrived / expiry in OnItemExpired) — demo mode never duplicates
+        // that logic, it just also reports the outcome. No-ops outside demo mode.
+        void EmitDemoBeat(bool ok)
+        {
+            if (!_demoMode) return;
+            // AT MOST ONCE per beat. One beat can reach here twice — a kicked ring later expires,
+            // a claimed treasure later expires — which used to burn two demo beats on one action
+            // and end the tour early. DemoRunRoutine opens each beat by clearing this flag.
+            if (_demoBeatResolved || _demoResolved >= _demoTotal) return;
+            _demoBeatResolved = true;
+            int index = _demoResolved;
+            _demoResolved++;
+            if (ok) _demoPassed++;
+            SendToFlutter.Send("{\"type\":\"demo_pose\",\"game\":\"thedasher\",\"index\":" + index +
+                                ",\"ok\":" + (ok ? "true" : "false") + "}");
+            // The run ends when DemoRunRoutine finishes its beats, not here — every beat now gets a
+            // settle before the tour is declared over.
+        }
+
+        // Demo slice finished: tell Flutter and stop, WITHOUT the normal results screen/payload —
+        // Flutter owns the demo's result UI. Mirrors EndRun's cleanup but skips scoring/UI/stars.
+        void EndDemoRun()
+        {
+            EndSitPose();
+            _state = State.Results; // stops TickPlay; nothing else reads State.Results in demo mode
+            if (spawner != null) spawner.StopRun();
+            if (_tool != null) DropTool();
+            // `completed` = beats the player PASSED (matches QuakeEscape). Every beat now always
+            // resolves, so "beats resolved" would just be `total` and carry no information.
+            SendToFlutter.Send("{\"type\":\"demo_done\",\"game\":\"thedasher\",\"completed\":" +
+                                _demoPassed + ",\"total\":" + _demoTotal + "}");
         }
 
         // ---- End of run → results. ----

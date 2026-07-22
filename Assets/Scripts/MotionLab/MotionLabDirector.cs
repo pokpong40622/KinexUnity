@@ -69,6 +69,7 @@ namespace Kinex.MotionLab
 
         State _state = State.Framing;
         bool _calibrated;
+        bool _coachMode;
 
         readonly FullBodyGate _fullBody = new FullBodyGate();
         readonly SitStandDetector _sitStand = new SitStandDetector();
@@ -119,11 +120,33 @@ namespace Kinex.MotionLab
             if (avatarRoot != null) _avatarBaseX = avatarRoot.position.x;
             if (toastText != null) toastText.text = "";
             if (debugPanel != null) debugPanel.SetActive(false);
+
+            // Coach mode: Flutter asked for a guided exercise instead of the free test range.
+            // Consume AND clear the pending value so a later normal Motion Lab run isn't coached.
+            string coachPose = Kinex.App.SceneRouter.PendingCoachPose;
+            Kinex.App.SceneRouter.PendingCoachPose = "";
+            if (coachPose == "hip_abduction") { EnterCoachMode(); return; }
+
             EnterFraming();
+        }
+
+        // The avatar mirror keeps running (the detector drives it directly); everything else is
+        // handed to the coach, which emits cue IDs to Flutter. Flutter draws the Thai UI on top —
+        // no Unity panel is used, because these runtime-built panels have no Thai font budget for
+        // the coaching copy and Flutter owns all wording + speech.
+        void EnterCoachMode()
+        {
+            _coachMode = true;
+            if (framingPanel != null) framingPanel.SetActive(false);
+            if (hudPanel != null) hudPanel.SetActive(false);
+            if (calibGroup != null) calibGroup.SetActive(false);
+            var coach = gameObject.AddComponent<HipAbductionCoach>();
+            coach.poseDetector = poseDetector;
         }
 
         void Update()
         {
+            if (_coachMode) return; // HipAbductionCoach owns the frame in coach mode
             float dt = Time.deltaTime;
             TickMotion(dt);
 
