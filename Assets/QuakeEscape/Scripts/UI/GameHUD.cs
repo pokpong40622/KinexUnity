@@ -1,5 +1,6 @@
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace Collapse
 {
@@ -46,6 +47,14 @@ namespace Collapse
             ApplyStroke(promptText);
             ApplyStroke(bigText);
             heartsText.color = HeartColor;
+
+            // DEBUG HOOK: tapping the on-screen timer opens the SOS card immediately, so QA can
+            // preview the whole fall-alert flow without staging a real fall. Remove if this ever
+            // needs to ship without a debug trigger.
+            var sosTestBtn = timerText.gameObject.GetComponent<Button>();
+            if (sosTestBtn == null) sosTestBtn = timerText.gameObject.AddComponent<Button>();
+            sosTestBtn.transition = Selectable.Transition.None;
+            sosTestBtn.onClick.AddListener(() => GameManager.Instance?.DebugShowSos());
         }
 
         // The SDF outline alone can't get thicker than ~a hairline (atlas padding

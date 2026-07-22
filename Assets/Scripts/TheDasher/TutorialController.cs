@@ -17,6 +17,19 @@ namespace Kinex.TheDasher
         public System.Action OnSkip;   // director ends the tutorial early
         public TMP_FontAsset thaiFont; // scene's Thai TMP font (skip + success labels)
 
+        // Wired by TheDasherDirector from its own Inspector fields (same pattern as thaiFont) —
+        // this component is added at runtime via AddComponent, so it has no scene presence of its
+        // own to assign sprites to directly.
+        [Header("Chair-prep diagram + button art (set by TheDasherDirector)")]
+        [Tooltip("Rounded camera-frame border for the chair diagram. Reuses TheDasher/UI/feed_frame.png.")]
+        public Sprite frameSprite;
+        [Tooltip("Round dot used for the diagram's head/lens. Reuses TheDasher/UI/dot_on.png.")]
+        public Sprite headSprite;
+        [Tooltip("เริ่มสอนเล่น button background (idle). Reuses TheDasher/UI/btn_primary.png.")]
+        public Sprite buttonSprite;
+        [Tooltip("เริ่มสอนเล่น button background (pressed). Reuses TheDasher/UI/btn_primary_down.png.")]
+        public Sprite buttonPressedSprite;
+
         // On-screen banner width; the HEIGHT is derived from whatever the baked PNG's real aspect
         // is (see FitCardToSprite) rather than a hardcoded ratio. A constant here silently goes
         // stale the moment the cards are re-baked at a different size, which is exactly how the
@@ -168,36 +181,64 @@ namespace Kinex.TheDasher
                 dim.color = new Color(0f, 0f, 0f, 0.72f);
                 Stretch(dim.rectTransform);
 
-                // Baked intro picture (same web-baked style as the step1..3 cards):
-                // Resources/Tutorial/intro.png — camera frame + chair centred + Thai text.
-                float cardW = 940f, cardH = cardW * 0.7778f;
-                var pic = NewImage("IntroPic", _intro.transform, Color.white);
-                pic.preserveAspect = true;
-                var tex = Resources.Load<Texture2D>("Tutorial/intro");
-                if (tex != null)
-                {
-                    pic.sprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height),
-                        new Vector2(0.5f, 0.5f), 100f);
-                    cardH = cardW * tex.height / tex.width;
-                }
-                var prt = pic.rectTransform;
-                prt.anchorMin = prt.anchorMax = new Vector2(0.5f, 0.5f);
-                prt.pivot = new Vector2(0.5f, 0.5f);
-                prt.sizeDelta = new Vector2(cardW, cardH);
-                prt.anchoredPosition = new Vector2(0f, 80f);
+                // Chair-prep diagram, drawn from plain UI shapes instead of a baked photo (see
+                // BuildChairDiagram). The old baked banner showed the player standing face-on next
+                // to the chair — the WRONG angle — and was a wide/squashed landscape image. This is
+                // a portrait card (taller than wide) showing the correct side-on/¾ seated pose.
+                const float diagramW = 560f, diagramH = 760f;
+                const float diagramY = 300f;
+                BuildChairDiagram(_intro.transform, diagramW, diagramH, diagramY);
 
-                // เริ่มสอนเล่น start button, just below the card.
+                float diagramBottom = diagramY - diagramH * 0.5f;
+
+                var headline = NewTmp("IntroHeadline", _intro.transform, 44, FontStyles.Bold, Color.white);
+                headline.text = "วางเก้าอี้ให้เอียงข้างเข้าหากล้อง";
+                var hRt = headline.rectTransform;
+                hRt.anchorMin = hRt.anchorMax = new Vector2(0.5f, 0.5f);
+                hRt.pivot = new Vector2(0.5f, 0.5f);
+                hRt.sizeDelta = new Vector2(920f, 60f);
+                float headlineY = diagramBottom - 24f - 30f;
+                hRt.anchoredPosition = new Vector2(0f, headlineY);
+                headline.raycastTarget = false;
+
+                var subtext = NewTmp("IntroSubtext", _intro.transform, 32, FontStyles.Normal,
+                    new Color(0.86f, 0.88f, 0.96f));
+                subtext.text = "นั่งให้เห็นทั้งตัวตั้งแต่หัวถึงเท้าในกล้อง ห่างจากแท็บเล็ตประมาณ 2 เมตร";
+                var subRt = subtext.rectTransform;
+                subRt.anchorMin = subRt.anchorMax = new Vector2(0.5f, 0.5f);
+                subRt.pivot = new Vector2(0.5f, 0.5f);
+                subRt.sizeDelta = new Vector2(880f, 96f);
+                float subtextY = headlineY - 30f - 12f - 48f;
+                subRt.anchoredPosition = new Vector2(0f, subtextY);
+                subtext.raycastTarget = false;
+
+                // เริ่มสอนเล่น start button — a proper sliced button sprite instead of a flat
+                // colour rect, with a pressed-state swap when the art is wired.
+                float buttonY = subtextY - 48f - 30f - 60f;
                 var btn = new GameObject("IntroStart");
                 btn.transform.SetParent(_intro.transform, false);
-                var btnBg = btn.AddComponent<Image>();
-                btnBg.color = new Color(0.09f, 0.72f, 0.53f, 1f);
-                var bg = btnBg.rectTransform;
+                var btnImg = btn.AddComponent<Image>();
+                btnImg.sprite = buttonSprite;
+                btnImg.type = Image.Type.Sliced;
+                btnImg.color = buttonSprite != null ? Color.white : new Color(0.09f, 0.72f, 0.53f, 1f);
+                var bg = btnImg.rectTransform;
                 bg.anchorMin = bg.anchorMax = new Vector2(0.5f, 0.5f);
                 bg.pivot = new Vector2(0.5f, 0.5f);
                 bg.sizeDelta = new Vector2(520f, 120f);
-                bg.anchoredPosition = new Vector2(0f, 80f - cardH * 0.5f - 82f);
+                bg.anchoredPosition = new Vector2(0f, buttonY);
                 var b = btn.AddComponent<Button>();
-                b.transition = Selectable.Transition.None;
+                b.targetGraphic = btnImg;
+                if (buttonPressedSprite != null)
+                {
+                    b.transition = Selectable.Transition.SpriteSwap;
+                    var ss = b.spriteState;
+                    ss.pressedSprite = buttonPressedSprite;
+                    b.spriteState = ss;
+                }
+                else
+                {
+                    b.transition = Selectable.Transition.None;
+                }
                 b.onClick.AddListener(() =>
                 {
                     if (_intro != null) _intro.SetActive(false);
@@ -212,6 +253,92 @@ namespace Kinex.TheDasher
 
             _onIntroStart = onStart;
             _intro.SetActive(true);
+        }
+
+        /// <summary>
+        /// Draws the "how to sit for the camera" diagram from plain UI shapes: a seated silhouette
+        /// viewed side-on/¾ inside a camera-frame border, with a small tablet/camera icon showing
+        /// where the device sits. This is the ACTUAL setup for The Dasher — chair angled toward the
+        /// camera, whole body head-to-feet visible — unlike the old baked photo, which showed
+        /// someone standing face-on next to the chair.
+        /// </summary>
+        void BuildChairDiagram(Transform parent, float w, float h, float centerY)
+        {
+            var box = new GameObject("ChairDiagram", typeof(RectTransform));
+            box.transform.SetParent(parent, false);
+            var boxRt = (RectTransform)box.transform;
+            boxRt.anchorMin = boxRt.anchorMax = new Vector2(0.5f, 0.5f);
+            boxRt.pivot = new Vector2(0.5f, 0.5f);
+            boxRt.sizeDelta = new Vector2(w, h);
+            boxRt.anchoredPosition = new Vector2(0f, centerY);
+
+            // Dark card behind the frame border so the border reads clearly over the modal's own
+            // dim backdrop.
+            var bg = NewImage("Bg", box.transform, new Color(0.07f, 0.09f, 0.16f, 1f));
+            Stretch(bg.rectTransform);
+
+            // Camera-frame border — reuses the HUD's own feed_frame art (a rounded rect with a
+            // green outline) instead of drawing fresh corner brackets.
+            var frameImg = NewImage("Frame", box.transform, Color.white);
+            frameImg.sprite = frameSprite;
+            frameImg.type = Image.Type.Sliced;
+            Stretch(frameImg.rectTransform);
+            frameImg.raycastTarget = false;
+
+            // ---- Chair, side profile: backrest toward the back of the frame, front leg forward.
+            Color chairColor = new Color(0.42f, 0.5f, 0.86f);
+            float seatY = -h * 0.06f;
+            float chairLeftX = -w * 0.16f;  // backrest x
+            float chairRightX = w * 0.06f;  // front-leg x
+
+            NewRect(box.transform, "Backrest", chairColor, new Vector2(18f, h * 0.24f),
+                new Vector2(chairLeftX, seatY + h * 0.12f));
+            NewRect(box.transform, "Seat", chairColor, new Vector2(chairRightX - chairLeftX + 40f, 18f),
+                new Vector2((chairLeftX + chairRightX) * 0.5f, seatY));
+            NewRect(box.transform, "BackLeg", chairColor, new Vector2(14f, h * 0.16f),
+                new Vector2(chairLeftX, seatY - h * 0.08f - 9f));
+            NewRect(box.transform, "FrontLeg", chairColor, new Vector2(14f, h * 0.16f),
+                new Vector2(chairRightX, seatY - h * 0.08f - 9f));
+
+            // ---- Seated person, side-on: torso leaning back on the backrest, knee bent ~90°,
+            // whole body (head to feet) inside the frame — exactly how the camera should see them.
+            Color bodyColor = Color.white;
+            float hipX = chairLeftX + 14f;
+            float hipY = seatY + 9f;
+            float thighLen = (chairRightX - chairLeftX) + 26f;
+            float shinLen = h * 0.26f;
+
+            NewRect(box.transform, "Torso", bodyColor, new Vector2(20f, h * 0.24f),
+                new Vector2(hipX - 6f, hipY + h * 0.12f));
+
+            var head = NewImage("Head", box.transform, Color.white);
+            head.sprite = headSprite;
+            var headRt = head.rectTransform;
+            headRt.anchorMin = headRt.anchorMax = new Vector2(0.5f, 0.5f);
+            headRt.pivot = new Vector2(0.5f, 0.5f);
+            headRt.sizeDelta = new Vector2(46f, 46f);
+            headRt.anchoredPosition = new Vector2(hipX - 6f, hipY + h * 0.24f + 30f);
+
+            NewRect(box.transform, "Thigh", bodyColor, new Vector2(thighLen, 18f),
+                new Vector2(hipX + thighLen * 0.5f, hipY));
+            NewRect(box.transform, "Shin", bodyColor, new Vector2(18f, shinLen),
+                new Vector2(hipX + thighLen, hipY - shinLen * 0.5f));
+            NewRect(box.transform, "Foot", bodyColor, new Vector2(34f, 12f),
+                new Vector2(hipX + thighLen + 8f, hipY - shinLen - 6f));
+
+            // Small device icon inside the bottom edge of the frame — the tablet/camera sits here;
+            // the chair should be a couple of metres out, fully inside the frame above. Kept INSIDE
+            // the frame bounds (rather than hanging below it) so it can never collide with the
+            // caption text sitting underneath the whole diagram.
+            var tablet = NewRect(box.transform, "Tablet", new Color(0.15f, 0.16f, 0.22f),
+                new Vector2(46f, 64f), new Vector2(0f, -h * 0.5f + 42f));
+            var lens = NewImage("Lens", tablet.transform, new Color(0.6f, 0.85f, 1f));
+            lens.sprite = headSprite; // reuse the round sprite as a simple camera-dot
+            var lensRt = lens.rectTransform;
+            lensRt.anchorMin = lensRt.anchorMax = new Vector2(0.5f, 1f);
+            lensRt.pivot = new Vector2(0.5f, 1f);
+            lensRt.sizeDelta = new Vector2(14f, 14f);
+            lensRt.anchoredPosition = new Vector2(0f, -10f);
         }
 
         public void ShowSuccess()
@@ -253,6 +380,19 @@ namespace Kinex.TheDasher
             go.transform.SetParent(parent, false);
             var img = go.AddComponent<Image>();
             img.color = color;
+            return img;
+        }
+
+        /// <summary>A plain colour rectangle at a given size/position — the building block for the
+        /// chair diagram's chair and body parts.</summary>
+        static Image NewRect(Transform parent, string name, Color color, Vector2 size, Vector2 pos)
+        {
+            var img = NewImage(name, parent, color);
+            var rt = img.rectTransform;
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = size;
+            rt.anchoredPosition = pos;
             return img;
         }
 

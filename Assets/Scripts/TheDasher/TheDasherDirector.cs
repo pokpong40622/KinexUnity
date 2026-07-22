@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using Kinex.Motion;
 using Kinex.FX;
+using Kinex.Shared;
 
 namespace Kinex.TheDasher
 {
@@ -87,6 +88,16 @@ namespace Kinex.TheDasher
         [Header("Camera shake")]
         [Tooltip("Shaken briefly on a meteor hit. Wire the Main Camera transform.")]
         public Transform shakeTarget;
+
+        [Header("Tutorial diagram + button art")]
+        [Tooltip("Camera-frame border for the chair-prep diagram (TutorialController.ShowIntro). Assign TheDasher/UI/feed_frame.png.")]
+        public Sprite tutorialFrameSprite;
+        [Tooltip("Round dot for the diagram's head/lens. Assign TheDasher/UI/dot_on.png.")]
+        public Sprite tutorialHeadSprite;
+        [Tooltip("เริ่มสอนเล่น button background (idle). Assign TheDasher/UI/btn_primary.png.")]
+        public Sprite tutorialButtonSprite;
+        [Tooltip("เริ่มสอนเล่น button background (pressed). Assign TheDasher/UI/btn_primary_down.png.")]
+        public Sprite tutorialButtonPressedSprite;
 
         [Header("Panels")]
         public GameObject introPanel;
@@ -325,13 +336,16 @@ namespace Kinex.TheDasher
 
             // Emergency fall-alert overlay (SOS). Lives on this director and watches the pose for a
             // fall; if one fires it counts down and asks Flutter to auto-dial the emergency contact.
-            // The score display doubles as a TEST trigger — tap it to preview the whole SOS flow.
             _sos = gameObject.AddComponent<SosController>();
             _sos.poseDetector = poseDetector;
-            if (scoreText != null)
+
+            // DEBUG HOOK: tapping the on-screen clock/timer opens the SOS card immediately, so QA
+            // can preview the whole flow without staging a real fall. Remove if this ever needs to
+            // ship without a debug trigger.
+            if (timerText != null)
             {
-                var sosTestBtn = scoreText.gameObject.GetComponent<Button>();
-                if (sosTestBtn == null) sosTestBtn = scoreText.gameObject.AddComponent<Button>();
+                var sosTestBtn = timerText.gameObject.GetComponent<Button>();
+                if (sosTestBtn == null) sosTestBtn = timerText.gameObject.AddComponent<Button>();
                 sosTestBtn.transition = Selectable.Transition.None;
                 sosTestBtn.onClick.AddListener(() => _sos.Show());
             }
@@ -523,6 +537,11 @@ namespace Kinex.TheDasher
             // Give the banner the scene's Thai TMP font (same one the toast pill uses).
             _tut.thaiFont = toastText != null ? toastText.font
                           : (spawner != null ? spawner.thaiFont : null);
+            // Chair-diagram + button art (see TutorialController.ShowIntro/BuildChairDiagram).
+            _tut.frameSprite = tutorialFrameSprite;
+            _tut.headSprite = tutorialHeadSprite;
+            _tut.buttonSprite = tutorialButtonSprite;
+            _tut.buttonPressedSprite = tutorialButtonPressedSprite;
             _tutSuccessTimer = 0f;
             _tutCueLive = false;
             _tutArm = 0f;

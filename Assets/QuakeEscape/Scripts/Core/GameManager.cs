@@ -2,6 +2,7 @@ using System.Collections;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
+using Kinex.Shared;
 
 namespace Collapse
 {
@@ -58,11 +59,14 @@ namespace Collapse
         private IPoseSource poseSource;
         private DasherPoseSource armSource;
         private OutOfFrameOverlay framingOverlay;
+        private SosController sos; // emergency fall-alert overlay, shared with The Dasher
 
         public int Hearts { get; private set; }
         public float RemainingTime { get; private set; }
         public GamePhase Phase { get; private set; } = GamePhase.Ready;
-        public string Prompt { get; private set; } = "กด SPACE เพื่อเริ่ม";
+        // Desktop-only "press space" hint removed — the game is touch/camera driven on
+        // tablet and this text used to flash under the menu while it faded out.
+        public string Prompt { get; private set; } = "";
         public WarningSide CurrentWarning { get; private set; } = WarningSide.None;
         public float PhaseTimeLeft { get; private set; }
 
@@ -85,6 +89,12 @@ namespace Collapse
             if (armSource == null) armSource = FindFirstObjectByType<DasherPoseSource>();
             framingOverlay = FindFirstObjectByType<OutOfFrameOverlay>(FindObjectsInactive.Include);
 
+            // Emergency fall-alert overlay (SOS), reused from The Dasher. Watches the same
+            // MediaPipePoseDetector the arm-mirroring already reads from (via DasherPoseSource) and
+            // pops a red "call your relatives" card if the player goes down during a real run.
+            sos = gameObject.AddComponent<SosController>();
+            sos.poseDetector = armSource != null ? armSource.Detector : null;
+
             Hearts = maxHearts;
             RemainingTime = totalTime;
 
@@ -99,6 +109,14 @@ namespace Collapse
 
         private void Update()
         {
+            // Fall detection only runs during the actual survive phases (Warning/Gap/Rest) — never
+            // while the player is still framing up, mid-countdown, or on a results screen, so a
+            // stumble while getting into position can't lock into a false SOS.
+            if (sos != null)
+            {
+                sos.autoFallDetect = Phase == GamePhase.Warning || Phase == GamePhase.Gap || Phase == GamePhase.Rest;
+            }
+
             if (Time.timeScale == 0f)
             {
                 return;
@@ -140,6 +158,14 @@ namespace Collapse
             {
                 BeginCountdown();
             }
+        }
+
+        // DEBUG HOOK: wired to the on-screen timer tap (see GameHUD) so QA can preview the SOS
+        // card immediately without staging a real fall. Remove if this ever needs to ship without
+        // a debug trigger.
+        public void DebugShowSos()
+        {
+            sos?.Show();
         }
 
         private void BeginCountdown()

@@ -70,6 +70,10 @@ namespace Collapse
 
         public bool HasBaseline => baseline.isSet;
 
+        /// <summary>The underlying camera+AI detector, for systems that need raw landmarks directly
+        /// (e.g. Kinex.Shared.SosController's fall detection).</summary>
+        public MediaPipePoseDetector Detector => detector;
+
         /// <summary>The player's arms this frame, for the avatar to mirror. Invalid until tracked.</summary>
         public ArmPose Arms { get; private set; }
 

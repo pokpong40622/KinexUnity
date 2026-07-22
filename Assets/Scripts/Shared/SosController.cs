@@ -2,15 +2,16 @@ using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
-using Kinex.Motion;
 
-namespace Kinex.TheDasher
+namespace Kinex.Shared
 {
     /// <summary>
-    /// Emergency fall-alert overlay for The Dasher. On a detected fall (or the score-tap TEST
-    /// hook) it pops a red SOS popup built at runtime from the baked sprite Resources/SOS/sos_card
-    /// (all Thai text is baked into that image; only the countdown number + draining bar are live,
-    /// so no in-Unity Thai font is needed). A [countdownSeconds] countdown runs; tapping the card
+    /// Shared emergency fall-alert overlay. Originally built for The Dasher, now reused by any
+    /// camera-pose game (Quake Escape included) — add via gameObject.AddComponent&lt;SosController&gt;()
+    /// and assign poseDetector. On a detected fall (or a debug TEST hook — see each game's director)
+    /// it pops a red SOS popup built at runtime from the baked sprite Resources/SOS/sos_card (all Thai
+    /// text is baked into that image; only the countdown number + draining bar are live, so no
+    /// in-Unity Thai font is needed). A [countdownSeconds] countdown runs; tapping the card
     /// ("ฉันปลอดภัย — ยกเลิก") cancels it. If it reaches 0 uncancelled, Flutter is told to auto-dial
     /// the emergency contact via SendToFlutter {"type":"sos_call"} — the contact + the actual call
     /// live on the Flutter side.
@@ -26,7 +27,7 @@ namespace Kinex.TheDasher
 
         [Tooltip("Run automatic fall detection from the pose. Driven by the director — enabled ONLY " +
                  "during actual play (never framing/countdown/results), so a false fall can't freeze " +
-                 "the game. The score-tap TEST trigger works regardless.")]
+                 "the game. The debug TEST trigger works regardless.")]
         public bool autoFallDetect = false;
 
         [Tooltip("Pose detector to read the body pose from (set by the director).")]
@@ -91,7 +92,7 @@ namespace Kinex.TheDasher
             return horiz > vert * fallTiltFactor;
         }
 
-        /// <summary>Show the SOS alert and start the countdown. Called by fall-detect or the test tap.</summary>
+        /// <summary>Show the SOS alert and start the countdown. Called by fall-detect or the debug tap.</summary>
         public void Show()
         {
             if (_shown) return;
