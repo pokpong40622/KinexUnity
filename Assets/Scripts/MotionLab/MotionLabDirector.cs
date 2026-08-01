@@ -130,18 +130,70 @@ namespace Kinex.MotionLab
             EnterFraming();
         }
 
-        // The avatar mirror keeps running (the detector drives it directly); everything else is
-        // handed to the coach, which emits cue IDs to Flutter. Flutter draws the Thai UI on top —
-        // no Unity panel is used, because these runtime-built panels have no Thai font budget for
-        // the coaching copy and Flutter owns all wording + speech.
+        // Coach mode shows JUST the live camera + skeleton + realtime feedback (user: "no need to be
+        // a game"). The 3D avatar is hidden; a full-screen camera preview is built at runtime; the
+        // coach emits cue IDs to Flutter, which draws the Thai UI + speech on top (these runtime-built
+        // Unity panels have no Thai font budget, and Flutter owns all wording).
         void EnterCoachMode()
         {
             _coachMode = true;
             if (framingPanel != null) framingPanel.SetActive(false);
             if (hudPanel != null) hudPanel.SetActive(false);
             if (calibGroup != null) calibGroup.SetActive(false);
+
+            // Hide the 3D avatar but KEEP its GameObject active so the detector's Animator + tracking
+            // keep running (the detector lives on the avatar). Disable only the renderers, and stop
+            // the detector wasting work posing an invisible character.
+            if (poseDetector != null) poseDetector.AvatarDriving = false;
+            Transform hideRoot = avatarRoot != null ? avatarRoot
+                               : (poseDetector != null ? poseDetector.transform : null);
+            if (hideRoot != null)
+                foreach (var rend in hideRoot.GetComponentsInChildren<Renderer>(true))
+                    rend.enabled = false;
+
+            BuildCoachCameraView();
+
             var coach = gameObject.AddComponent<HipAbductionCoach>();
             coach.poseDetector = poseDetector;
+        }
+
+        // Full-screen live camera preview + skeleton overlay, built at runtime because MotionLabScene
+        // has no authored preview. The detector's webcam texture lands on this RawImage via
+        // SetPreviewSurface (robust to Start() order); the overlay reads the SAME detector, so Task A's
+        // orientation correction applies to both for free.
+        void BuildCoachCameraView()
+        {
+            // GameObject(name, types) guarantees a RectTransform exists BEFORE the UI Graphic (a
+            // Graphic added to a plain Transform has a null rectTransform).
+            var canvasGo = new GameObject("CoachCameraCanvas",
+                typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler));
+            var canvas = canvasGo.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = -10; // camera is the backdrop; Flutter draws its Thai cue card on top
+            var scaler = canvasGo.GetComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1080, 1920);
+
+            var previewGo = new GameObject("CameraPreview", typeof(RectTransform), typeof(RawImage));
+            previewGo.transform.SetParent(canvasGo.transform, false);
+            var raw = previewGo.GetComponent<RawImage>();
+            StretchFull(raw.rectTransform);
+
+            var skelGo = new GameObject("Skeleton", typeof(RectTransform), typeof(PoseSkeletonOverlay));
+            skelGo.transform.SetParent(previewGo.transform, false);
+            var overlay = skelGo.GetComponent<PoseSkeletonOverlay>();
+            StretchFull(overlay.rectTransform);
+            overlay.source = poseDetector;
+            overlay.confidenceColors = true; // green/amber/red per limb = live "am I tracked" feedback
+
+            if (poseDetector != null) poseDetector.SetPreviewSurface(raw);
+        }
+
+        static void StretchFull(RectTransform r)
+        {
+            r.anchorMin = Vector2.zero;
+            r.anchorMax = Vector2.one;
+            r.offsetMin = r.offsetMax = Vector2.zero;
         }
 
         void Update()

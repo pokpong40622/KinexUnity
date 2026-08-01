@@ -127,8 +127,23 @@ namespace Collapse
             // The in-scene menu now shows the character's face first and calls StartFromReady()
             // when the player presses PLAY (autoStart=false). If there is no menu (autoStart=true),
             // kick off the countdown straight away.
-            if (autoStart)
+            //
+            // Demo mode (Flutter quick tour) must start on its own too: the scene serializes
+            // autoStart=false so a REAL player sees the tutorial gate + PLAY button first, but
+            // during the demo nothing can press them (they sit under Flutter's overlay), so the
+            // guided run would just hang. GameManager owns demoMode, so it takes over as the
+            // authority here: suppress the menu and begin the countdown itself.
+            if (autoStart || demoMode)
             {
+                if (demoMode)
+                {
+                    var menu = FindFirstObjectByType<MainMenuController>(FindObjectsInactive.Include);
+                    if (menu != null)
+                    {
+                        menu.SuppressForDemo();
+                    }
+                }
+
                 BeginCountdown();
             }
         }
@@ -210,7 +225,17 @@ namespace Collapse
         {
             // Let the opening camera move finish first. Phase stays Ready here, and the overlay is
             // suppressed in Ready, so the framing card cannot pop up over the rotation.
+            //
+            // IntroCameraPan is serialized with autoPlay=false in this scene — it holds on the face
+            // shot and stays IsPanning==true forever until something calls Play(). Normally that is
+            // MainMenuController.PlayRoutine() on the PLAY button, but the demo never goes through
+            // PlayRoutine, so without this call the wait below spun forever and the demo never
+            // reached its first challenge. Kick the same orbit off ourselves in demo mode.
             var pan = Camera.main != null ? Camera.main.GetComponent<IntroCameraPan>() : null;
+            if (demoMode && pan != null)
+            {
+                pan.Play();
+            }
             while (pan != null && pan.IsPanning)
             {
                 yield return null;

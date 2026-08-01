@@ -83,9 +83,13 @@ public class PoseSkeletonOverlay : Graphic
         // sideways) and THIS overlay is its child, so an upright skeleton would be drawn sideways.
         // We counter that by rotating the mapped points by `previewRotateCW`. The editor/webcam preview
         // isn't rotated, so rot stays 0 there and we map straight through (head at top).
+        // previewRotateCW is the fixed quarter-turn that lands the skeleton on the Android preview;
+        // OrientationExtraRotationCW adds Task A's device-orientation correction (e.g. +180 when the
+        // tablet is flipped) so the skeleton stays matched to the orientation-corrected preview.
         int rot = 0;
 #if UNITY_ANDROID && !UNITY_EDITOR
-        rot = ((previewRotateCW % 360) + 360) % 360;
+        int extra = source != null ? source.OrientationExtraRotationCW : 0;
+        rot = (((previewRotateCW + extra) % 360) + 360) % 360;
 #endif
         bool quarter = rot == 90 || rot == 270;
         // A quarter turn swaps the rect's W/H back to the original on-screen box.
@@ -98,7 +102,10 @@ public class PoseSkeletonOverlay : Graphic
             float u = (p.x - off.x) / Mathf.Max(scl.x, 1e-4f);
             float v = (p.y - off.y) / Mathf.Max(scl.y, 1e-4f);
 #if UNITY_ANDROID && !UNITY_EDITOR
-            if (mirrorSkeletonX) u = 1f - u; // selfie mirror so the skeleton matches the avatar/body
+            // selfie mirror so the skeleton matches the avatar/body, inverted when the orientation
+            // correction (Task A) flips the preview's mirror axis.
+            bool inv = source != null && source.OrientationInvertMirror;
+            if (mirrorSkeletonX ^ inv) u = 1f - u;
 #endif
             if (rot == 0)
                 return new Vector2(r.xMin + u * r.width, r.yMin + v * r.height);

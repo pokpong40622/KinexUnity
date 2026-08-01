@@ -33,8 +33,16 @@ public class MainMenuController : MonoBehaviour
     bool gateOpen;
     Coroutine gateTween;
 
+    // Set by GameManager.SuppressForDemo() (see GameManager.Start()) when the scene is running
+    // Flutter's quick-demo tour instead of a real session. Start() and SuppressForDemo() can run in
+    // either order — Unity does not guarantee script execution order between components on
+    // different GameObjects — so Start() checks this flag before opening the tutorial gate.
+    bool demoSuppressed;
+
     void Start()
     {
+        if (demoSuppressed) return;
+
         if (tutorialGroup)
         {
             tutorialGroup.gameObject.SetActive(true);
@@ -59,6 +67,36 @@ public class MainMenuController : MonoBehaviour
             fadeGroup.blocksRaycasts = true;
             StartCoroutine(Fade(fadeGroup, 1f, 0f, fadeTime, false));
         }
+    }
+
+    // Called by GameManager when demoMode is true (Flutter quick tour): the tutorial gate and
+    // PLAY/EXIT menu must not sit on top of the demo, and nothing in the demo will ever tap them.
+    // GameManager starts the run itself right after calling this, so all this does is get the menu
+    // out of the way and make sure it can't pop back up.
+    //
+    // Hides via CanvasGroup (alpha/interactable/blocksRaycasts), never SetActive(false): this
+    // component's own coroutines (the opening fade, the gate-close tween) live on THIS GameObject,
+    // and deactivating it stops them mid-tween instead of letting them unwind — see PlayRoutine's
+    // comment above for the bug that caused. StopAllCoroutines() first, then force the end state.
+    public void SuppressForDemo()
+    {
+        demoSuppressed = true;
+        gateOpen = false;
+
+        StopAllCoroutines();
+        gateTween = null;
+
+        HideGroup(tutorialGroup);
+        HideGroup(menuGroup);
+        HideGroup(fadeGroup);
+    }
+
+    static void HideGroup(CanvasGroup g)
+    {
+        if (!g) return;
+        g.alpha = 0f;
+        g.interactable = false;
+        g.blocksRaycasts = false;
     }
 
     public void OnPlay()

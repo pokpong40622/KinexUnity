@@ -22,6 +22,7 @@ using UnityEngine;
 #if KINEX_MEDIAPIPE
 using System;
 using System.Collections.Generic;
+using UnityEngine.InputSystem;   // AccelerometerSensor fallback for orientation (NOT legacy Input)
 using Mediapipe;
 using Mediapipe.Tasks.Core;
 using Mediapipe.Tasks.Vision.Core;
@@ -257,6 +258,52 @@ public class MediaPipePoseDetector : MonoBehaviour
              "DISPLAY only — NOT the frame fed to MediaPipe (tracking is already correct). Applied on " +
              "Android only; ignored in the editor/desktop. Try 90 or 270 if the direction is wrong.")]
     [SerializeField] int previewRotationCW = 90;
+
+    [Header("Orientation-aware correction (portrait flip)")]
+    [Tooltip("Master switch. When ON, the preview, the skeleton overlay, and the frame fed to " +
+             "MediaPipe all rotate to follow the tablet's PHYSICAL orientation, so flipping the tablet " +
+             "180° (charging port on the other side) keeps the camera + skeleton upright to match " +
+             "Flutter's both-ways portrait UI. Android only — editor/desktop are unchanged. The exact " +
+             "behaviour of the embedded Unity surface under Flutter's portraitDown is UNVERIFIED, so " +
+             "every knob below is adjustable and debugLog prints one [Orient] line per second — a " +
+             "single on-device test is diagnostic.")]
+    [SerializeField] bool orientationAware = true;
+    [Tooltip("Rotate the on-screen PREVIEW + skeleton with the device orientation. Turn OFF if Flutter " +
+             "already rotates the whole embedded Unity texture (then the preview would double-rotate). " +
+             "Compare the [Orient] log's detected= against how the preview actually looks on device.")]
+    [SerializeField] bool rotatePreviewWithOrientation = true;
+    [Tooltip("Rotate the frame fed to MediaPipe with the device orientation so TRACKING stays upright " +
+             "when flipped. Turn OFF if the [Orient] log shows videoRot already changes by ~180 on flip " +
+             "(then the camera driver already compensates and this would over-rotate the tracking).")]
+    [SerializeField] bool rotateTrackingWithOrientation = true;
+    [Tooltip("When flipped 180°, also invert the selfie mirror. A 180° rotation usually keeps mirroring " +
+             "correct, so default OFF; turn ON if the flipped preview puts your body on the wrong side.")]
+    [SerializeField] bool flippedInvertMirror = false;
+    [Tooltip("Also correct the two landscape ('on its side') orientations (90°/270°). The 180° portrait " +
+             "flip is the priority; landscape is best-effort — flip the rotate toggles above off if it " +
+             "comes out wrong on your tablet.")]
+    [SerializeField] bool handleLandscape = true;
+    [Tooltip("Screen.orientation may be pinned to Portrait when Unity is embedded under Flutter (it " +
+             "can't see Flutter's rotation). If so, turn this ON to read orientation from the Input " +
+             "System accelerometer gravity vector INSTEAD. Default OFF = trust Screen.orientation and " +
+             "only fall back to the accelerometer when it reports Unknown/AutoRotation.")]
+    [SerializeField] bool preferAccelerometer = false;
+
+    public enum DeviceOrient { Portrait, PortraitFlipped, LandscapeLeft, LandscapeRight }
+    DeviceOrient _orient = DeviceOrient.Portrait;
+    int _extraDisplayCW;      // added to previewRotationCW + the skeleton's previewRotateCW
+    int _extraFrameCW;        // added to the MediaPipe-fed frame rotation (keeps tracking upright)
+    bool _extraInvertMirror;  // XOR into the preview + skeleton horizontal mirror
+    float _lastOrientDbg;
+
+    /// <summary>Extra clockwise degrees the skeleton overlay must ADD to its own previewRotateCW so it
+    /// stays matched to the orientation-corrected preview. 0 unless the tablet is flipped / on its side
+    /// (and orientationAware is on, Android only).</summary>
+    public int OrientationExtraRotationCW => _extraDisplayCW;
+    /// <summary>Whether the skeleton overlay must invert its horizontal mirror to match the
+    /// orientation-corrected preview.</summary>
+    public bool OrientationInvertMirror => _extraInvertMirror;
+
     public Vector2 PreviewCropOffset { get; private set; } = Vector2.zero; // x,y in 0..1
     public Vector2 PreviewCropScale { get; private set; } = Vector2.one;   // w,h in 0..1
     public bool PreviewMirrored => mirrorPreview;
@@ -348,7 +395,11 @@ public class MediaPipePoseDetector : MonoBehaviour
         LatestKeypoints = new Vector2[17];
         LatestConfidence = new float[17];
 
-        _rawImage = FindAnyObjectByType<UnityEngine.UI.RawImage>();
+        EnableAccelerometerIfNeeded(); // orientation fallback (Task A) — safe no-op if no sensor
+
+        // Only auto-find if nobody assigned one explicitly (coach mode calls SetPreviewSurface, which
+        // may run before OR after this Start — don't clobber that assignment).
+        if (_rawImage == null) _rawImage = FindAnyObjectByType<UnityEngine.UI.RawImage>();
 
         if (testVideoClip != null)
         {
@@ -628,7 +679,11 @@ public class MediaPipePoseDetector : MonoBehaviour
             _inferenceSkipCounter = 0;
         }
 
-        if (!_previewReady) TryApplyPreviewCrop();
+        UpdateOrientationCorrection();
+        // Re-run the cover-crop the first time AND whenever the orientation correction changes (the
+        // user flipped the tablet mid-session) — no longer latched forever by _previewReady alone.
+        if (!_previewReady || _appliedDisplayCW != _extraDisplayCW || _appliedInvertMirror != _extraInvertMirror)
+            TryApplyPreviewCrop();
 
         // ---- Feed the current source frame to MediaPipe. ----
         // NOTE: this is the one plugin-version-sensitive spot. If your installed plugin's
@@ -662,7 +717,11 @@ public class MediaPipePoseDetector : MonoBehaviour
             // → RotateFlip returns the original array unchanged (no allocation, no copy) and
             //   _frame is allocated with the same srcW × srcH dimensions as before — pixel-identical
             //   to the old _frame.SetPixels32(_webcam.GetPixels32()) path. ✓
-            int rot = _webcam.videoRotationAngle;   // degrees CW needed to make the image upright
+            // videoRotationAngle makes the sensor frame upright; _extraFrameCW adds the orientation
+            // correction (Task A) so a 180° tablet flip doesn't feed MediaPipe an upside-down person.
+            // _extraFrameCW is 0 on desktop/editor and in normal upright portrait, so the identity
+            // case below is preserved exactly.
+            int rot = _webcam.videoRotationAngle + _extraFrameCW;   // degrees CW to make the image upright
             bool vMirror = _webcam.videoVerticallyMirrored;
 
             // Reused destination buffers — GetPixels32() and RotateFlip used to each allocate a
@@ -808,22 +867,132 @@ public class MediaPipePoseDetector : MonoBehaviour
         EaseHipsHome();
     }
 
+    // ---- Orientation correction (Task A). Once per (inference) frame, work out how much extra
+    //      rotation the preview, the skeleton overlay, and the MediaPipe-fed frame each need so that
+    //      everything follows the tablet's physical orientation. All extras are 0 in normal upright
+    //      portrait and on desktop/editor, so the default behaviour is byte-for-byte unchanged. ----
+    void UpdateOrientationCorrection()
+    {
+        _orient = DetectOrientation();
+
+        int extra; bool invert = false;
+        switch (_orient)
+        {
+            case DeviceOrient.PortraitFlipped: extra = 180; invert = flippedInvertMirror; break;
+            case DeviceOrient.LandscapeLeft:   extra = handleLandscape ? 90  : 0; break;
+            case DeviceOrient.LandscapeRight:  extra = handleLandscape ? 270 : 0; break;
+            default:                           extra = 0; break;   // Portrait (design orientation)
+        }
+
+        bool active = orientationAware;
+#if !UNITY_ANDROID || UNITY_EDITOR
+        active = false; // preview rotation is Android-only; leave editor/desktop exactly as before
+#endif
+        if (!active) { _extraDisplayCW = 0; _extraFrameCW = 0; _extraInvertMirror = false; }
+        else
+        {
+            _extraDisplayCW    = rotatePreviewWithOrientation  ? extra : 0;
+            _extraFrameCW      = rotateTrackingWithOrientation ? extra : 0;
+            _extraInvertMirror = invert;
+        }
+
+        if (debugLog && Time.time - _lastOrientDbg > 1f)
+        {
+            _lastOrientDbg = Time.time;
+            int va = _webcam != null ? _webcam.videoRotationAngle : 0;
+            bool vm = _webcam != null && _webcam.videoVerticallyMirrored;
+            Debug.Log($"[Orient] screen={Screen.orientation} {Screen.width}x{Screen.height} " +
+                      $"detected={_orient} extraDisplayCW={_extraDisplayCW} extraFrameCW={_extraFrameCW} " +
+                      $"invMirror={_extraInvertMirror} videoRot={va} vMirror={vm}");
+        }
+    }
+
+    // Prefer Screen.orientation (a display API, allowed by CLAUDE.md); fall back to the Input System
+    // accelerometer when Screen.orientation is Unknown/AutoRotation — or always, if preferAccelerometer
+    // is set because the embedded surface pins Screen.orientation to Portrait.
+    DeviceOrient DetectOrientation()
+    {
+        if (preferAccelerometer)
+        {
+            var g = ReadGravity();
+            if (g.HasValue) return OrientFromGravity(g.Value);
+        }
+        switch (Screen.orientation)
+        {
+            case ScreenOrientation.Portrait:           return DeviceOrient.Portrait;
+            case ScreenOrientation.PortraitUpsideDown: return DeviceOrient.PortraitFlipped;
+            case ScreenOrientation.LandscapeLeft:      return DeviceOrient.LandscapeLeft;
+            case ScreenOrientation.LandscapeRight:     return DeviceOrient.LandscapeRight;
+        }
+        var grav = ReadGravity();
+        return grav.HasValue ? OrientFromGravity(grav.Value) : DeviceOrient.Portrait;
+    }
+
+    // Gravity from the Input System accelerometer (NOT legacy Input). Null if unavailable/near-zero.
+    Vector3? ReadGravity()
+    {
+        var a = Accelerometer.current;
+        if (a == null) return null;
+        Vector3 v = a.acceleration.ReadValue();
+        return v.sqrMagnitude < 1e-4f ? (Vector3?)null : v;
+    }
+
+    // Classify orientation from the gravity vector. Portrait-up reads ~ (0,-1,0); a 180° flip ~ (0,+1,0);
+    // landscape has |x| dominant. The landscape left/right sign is a best-effort guess — verify on device.
+    static DeviceOrient OrientFromGravity(Vector3 g)
+    {
+        if (Mathf.Abs(g.y) >= Mathf.Abs(g.x))
+            return g.y <= 0f ? DeviceOrient.Portrait : DeviceOrient.PortraitFlipped;
+        return g.x < 0f ? DeviceOrient.LandscapeLeft : DeviceOrient.LandscapeRight;
+    }
+
+    void EnableAccelerometerIfNeeded()
+    {
+        var a = Accelerometer.current;
+        if (a != null && !a.enabled) InputSystem.EnableDevice(a);
+    }
+
     // Cover-fit the landscape webcam into the (portrait) preview rect without distortion,
     // and expose the crop so PoseSkeletonOverlay maps landmarks onto the same visible region.
+    //
+    // Idempotent + re-runnable: the authored rect is captured once and restored at the top of every
+    // call, so re-applying it on an orientation change (see Update) can't compound the size-swap or
+    // the mirror flip below.
+    bool _origRectCached;
+    Vector2 _origAnchorMin, _origAnchorMax, _origPivot, _origSizeDelta, _origAnchoredPos;
+    Vector3 _origLocalScale;
+    int _appliedDisplayCW = int.MinValue;   // last _extraDisplayCW actually baked into the rect
+    bool _appliedInvertMirror;
+
     void TryApplyPreviewCrop()
     {
         if (SrcWidth <= 16 || _rawImage == null) return;
 
         var rt = _rawImage.rectTransform;
 
-        // Preview-only rotation (Android front cam delivers rotated frames). A quarter turn swaps the
-        // box's axes, so re-anchor the RawImage to a centred, size-swapped rect BEFORE rotating, so the
-        // rotated image fills the box instead of overflowing it. Editor/desktop: rotCW stays 0.
+        if (!_origRectCached)
+        {
+            _origAnchorMin = rt.anchorMin; _origAnchorMax = rt.anchorMax;
+            _origPivot = rt.pivot; _origSizeDelta = rt.sizeDelta; _origAnchoredPos = rt.anchoredPosition;
+            _origLocalScale = rt.localScale;
+            _origRectCached = true;
+        }
+        // Restore the authored rect before (re)applying, so this method is idempotent.
+        rt.anchorMin = _origAnchorMin; rt.anchorMax = _origAnchorMax;
+        rt.pivot = _origPivot; rt.sizeDelta = _origSizeDelta; rt.anchoredPosition = _origAnchoredPos;
+        rt.localScale = _origLocalScale;
+        rt.localEulerAngles = Vector3.zero;
+
+        // Preview-only rotation (Android front cam delivers rotated frames) PLUS the orientation
+        // correction (_extraDisplayCW: +180 flipped, 90/270 on its side). A quarter turn swaps the
+        // box's axes, so re-anchor to a centred, size-swapped rect BEFORE rotating, so the rotated
+        // image fills the box instead of overflowing. Editor/desktop: rotCW stays 0.
         int rotCW = 0;
 #if UNITY_ANDROID && !UNITY_EDITOR
-        rotCW = previewRotationCW;
+        rotCW = previewRotationCW + _extraDisplayCW;
 #endif
-        bool quarter = (Mathf.Abs(rotCW) % 180) == 90;
+        rotCW = ((rotCW % 360) + 360) % 360;
+        bool quarter = (rotCW % 180) == 90;
         if (quarter)
         {
             Vector2 box = rt.rect.size;                       // current on-screen box size
@@ -850,7 +1019,9 @@ public class MediaPipePoseDetector : MonoBehaviour
         PreviewCropScale  = new Vector2(sw, sh);
         _rawImage.uvRect  = new UnityEngine.Rect(ox, vFlip ? oy + sh : oy, sw, vFlip ? -sh : sh);
 
-        if (mirrorPreview && !UsingVideo) // don't mirror a recorded clip — it's not a selfie
+        // Selfie mirror, inverted when the orientation correction calls for it (flipped 180°).
+        bool mirror = mirrorPreview ^ _extraInvertMirror;
+        if (mirror && !UsingVideo) // don't mirror a recorded clip — it's not a selfie
         {
             var s = rt.localScale;
             // After a quarter turn the screen-horizontal axis is the rect's local Y, so mirror that.
@@ -858,7 +1029,26 @@ public class MediaPipePoseDetector : MonoBehaviour
             else         s.x = -Mathf.Abs(s.x);
             rt.localScale = s;
         }
+
+        _appliedDisplayCW = _extraDisplayCW;
+        _appliedInvertMirror = _extraInvertMirror;
         _previewReady = true;
+    }
+
+    // Coach mode (MotionLabDirector) builds the camera preview RawImage at RUNTIME and hands it here,
+    // because MotionLabScene has no authored preview. Safe regardless of Start() order: if this runs
+    // BEFORE Start(), Start() keeps this surface (it only auto-finds when _rawImage is still null); if
+    // Start() already ran, _webcam exists and we bind its texture now.
+    public void SetPreviewSurface(UnityEngine.UI.RawImage img)
+    {
+        _rawImage = img;
+        if (img != null)
+        {
+            if (_webcam != null)       img.texture = _webcam;
+            else if (_videoRT != null) img.texture = _videoRT;
+        }
+        _origRectCached = false; // capture the new surface's authored rect
+        _previewReady = false;   // re-run the cover-crop for it
     }
 
     // --- Runtime controls (driven by the in-game Camera Setup / gear panel) ---
@@ -1536,5 +1726,8 @@ public class MediaPipePoseDetector : MonoBehaviour
     // No-op when MediaPipe is disabled (e.g. Android build without KINEX_MEDIAPIPE). Keeps callers
     // such as CalibrationPanel compiling; the calibration properties stay at their Idle defaults.
     public void StartCalibration() { }
+
+    // No-op stub so MotionLabDirector's coach mode compiles without MediaPipe.
+    public void SetPreviewSurface(UnityEngine.UI.RawImage img) { }
 #endif
 }
