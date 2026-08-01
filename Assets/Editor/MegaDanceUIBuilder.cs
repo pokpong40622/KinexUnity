@@ -220,7 +220,11 @@ namespace Kinex.MegaDance.EditorTools
             so.ApplyModifiedPropertiesWithoutUndo();
 
             // Always-on small camera+skeleton preview in the top-right corner (on top of everything).
-            BuildCornerPreview(canvas);
+            // Wired to the manager so it can be hidden during the FirstPose popup (never covers the card).
+            var cornerPreview = BuildCornerPreview(canvas);
+            var pso = new SerializedObject(manager);
+            pso.FindProperty("cameraPreview").objectReferenceValue = cornerPreview;
+            pso.ApplyModifiedPropertiesWithoutUndo();
 
             // TEMP debug button (bottom-left): skip straight to the next pose for testing. Remove later.
             // Hidden by default; MegaDanceManager only shows it while a game is in progress.
@@ -263,7 +267,7 @@ namespace Kinex.MegaDance.EditorTools
             Stretch(ov.rectTransform);
 
             var card = AddImage(ov.transform, "Card", null, Color.white);
-            Place(card.rectTransform, 93, 400, 741, 556);
+            Place(card.rectTransform, 93, 400, 741, 680);
 
             var title = AddText(ov.transform, "CALIBRATION", black, 58, FontStyles.Normal,
                                 new Color32(0x2A, 0x2A, 0x2A, 0xFF), TextAlignmentOptions.Center);
@@ -288,6 +292,25 @@ namespace Kinex.MegaDance.EditorTools
             var closeLbl = AddText(closeBtn.transform, "Close", semi, 34, FontStyles.Bold, Color.white, TextAlignmentOptions.Center);
             Stretch(closeLbl.rectTransform);
 
+            // Tracking-mode toggle: flip the avatar driver between 3D world-landmarks and the 2D fallback.
+            var trk = AddImage(ov.transform, "Toggle3DBtn", null, Navy);
+            trk.raycastTarget = true; Place(trk.rectTransform, 150, 960, 627, 88);
+            var trkC = trk.gameObject.AddComponent<Button>();
+            // Label reflects the LIVE mode (MegaDanceManager.RefreshTrackingModeLabel overwrites it
+            // each frame); "2D" here is just the default-boot text before the first frame runs.
+            var trkLbl = AddText(trk.transform, "Mode: 2D  —  tap to switch", semi, 32, FontStyles.Bold, Color.white, TextAlignmentOptions.Center);
+            Stretch(trkLbl.rectTransform);
+            if (detector != null)
+                UnityEditor.Events.UnityEventTools.AddPersistentListener(trkC.onClick, detector.ToggleTracking3D);
+            // Wire the label into the manager so it can show the live 2D/3D driver the instant it flips.
+            var mgr = managerGo.GetComponent<MegaDanceManager>();
+            if (mgr != null)
+            {
+                var mso = new SerializedObject(mgr);
+                mso.FindProperty("trackingModeLabel").objectReferenceValue = trkLbl;
+                mso.ApplyModifiedPropertiesWithoutUndo();
+            }
+
             var cp = managerGo.GetComponent<CalibrationPanel>();
             if (cp == null) cp = managerGo.AddComponent<CalibrationPanel>();
             var cso = new SerializedObject(cp);
@@ -306,10 +329,10 @@ namespace Kinex.MegaDance.EditorTools
         // Repurposes the scene's webcam feed (CameraFeedPanel > CameraFeedImage + PoseSkeletonOverlay)
         // as a small always-on preview pinned to the top-right corner, rendered on top of everything
         // (incl. the calibration dim) so the user can always check their framing/detection.
-        static void BuildCornerPreview(Canvas canvas)
+        static GameObject BuildCornerPreview(Canvas canvas)
         {
             var feed = canvas.transform.Find("CameraFeedPanel");
-            if (feed == null) return; // no webcam feed object in this scene
+            if (feed == null) return null; // no webcam feed object in this scene
 
             feed.SetParent(canvas.transform, false);
             feed.gameObject.SetActive(true);
@@ -327,6 +350,7 @@ namespace Kinex.MegaDance.EditorTools
                 rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
                 rt.offsetMin = new Vector2(6, 6); rt.offsetMax = new Vector2(-6, -6); // small inset border
             }
+            return feed.gameObject;
         }
 
         // ---- helpers ----------------------------------------------------------------

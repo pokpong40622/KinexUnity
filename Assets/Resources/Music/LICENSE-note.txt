@@ -1,0 +1,43 @@
+Music tracks in this folder — all CC0 / Public Domain. No attribution required, but source
+links kept here for provenance.
+
+fruit_theme.mp3
+  "Sunny Side Up" by cynicmusic
+  Source: https://opengameart.org/content/sunny-side-up
+  Direct: https://opengameart.org/sites/default/files/Sunny%20Side%20Up.mp3
+  License: CC0
+
+quest_theme.mp3
+  "Cyber Anxiety" by holiznacc0 (from the "Retro Wave" collection)
+  Source: https://opengameart.org/content/retro-wave-collection
+  Direct: https://opengameart.org/sites/default/files/03_holiznacc0_-_cyber_anxiety.mp3
+  License: CC0 ("This music is public domain Cc0, so use it how you want!")
+  Note: file is ~6.5MB, slightly over the 5MB guideline — kept because it is the best CC0
+  match for the synthwave/retrowave brief that could be confirmed. Re-encode/trim with
+  ffmpeg if a smaller build size is needed later (no ffmpeg available in this environment
+  to do it now).
+
+battle_theme.mp3
+  "Happy Adventure (Loop)" by cynicmusic
+  Source: https://opengameart.org/content/happy-adventure-loop
+  Direct: https://opengameart.org/sites/default/files/happy_adveture_0.mp3
+  License: CC0
+
+shop_theme.mp3
+  "Enchanted Tiki 86" by cynicmusic
+  Source: https://opengameart.org/content/enchanted-tiki-86
+  Direct: https://opengameart.org/sites/default/files/enchanted%20tiki%2086.mp3
+  License: CC0
+
+mirror_theme.mp3
+  "A cup of tea" by TAD (from the "lofi Compilation")
+  Source: https://opengameart.org/content/lofi-compilation
+  Direct: https://opengameart.org/sites/default/files/A%20cup%20of%20tea_0.mp3
+  License: CC0
+
+dance_theme.ogg
+  "Funky Disco Beats to Boogie/Woogie to" by Fupi
+  Source: https://opengameart.org/content/funky-disco-beats-to-boogiewoogie-to
+  Direct: https://opengameart.org/sites/default/files/funkydiscobeatstoboogieslashwoogieto_0.ogg
+  License: CC0
+  Used by: SUPERSTAR STAGE (dancestar)

@@ -22,11 +22,21 @@ namespace Kinex.MegaDance
         /// Returns a full coaching sentence (or "" if every limb is within the deadzone /
         /// nothing valid). playerAngles/targetAngles are SegmentAngle-space radians from
         /// PoseScorer.ComputeAngles. deadzoneRad: limbs closer than this produce no hint.
+        /// turnErrorDeg/turnDeadzoneDeg add a TURN cue that takes priority over the limb cue — a
+        /// signed avatar-vs-trainer hip-yaw gap; positive ⇒ "turn right". Pass the default huge
+        /// deadzone to disable it (e.g. 2D mode / unit tests).
         /// </summary>
         public static string Compute(float[] playerAngles, float[] targetAngles, bool[] valid,
-                                     float deadzoneRad, bool mirrorLR = false)
+                                     float deadzoneRad, bool mirrorLR = false,
+                                     float turnErrorDeg = 0f, float turnDeadzoneDeg = 9999f)
         {
             if (playerAngles == null || targetAngles == null) return "";
+
+            // 1) TURN first — orientation can't be fixed by moving a single limb, so coach it before
+            //    anything else when the player is facing the wrong way for a side-on pose.
+            if (Mathf.Abs(turnErrorDeg) > turnDeadzoneDeg)
+                return turnErrorDeg > 0f ? "Turn to your right." : "Turn to your left.";
+
             int worst = -1;
             float worstErr = deadzoneRad;
             for (int i = 0; i < PoseScorer.NumLimbs; i++)
@@ -35,7 +45,7 @@ namespace Kinex.MegaDance
                 float err = PoseScorer.AngleError(playerAngles[i], targetAngles[i]);
                 if (err > worstErr) { worstErr = err; worst = i; }
             }
-            if (worst < 0) return "Nice — hold that pose!"; // everything within the deadzone
+            if (worst < 0) return "Great! Hold the pose!"; // everything within the deadzone
 
             string dir = Direction(playerAngles[worst], targetAngles[worst]);
             // The avatar mirrors the user, so the rig's left/right is the OPPOSITE of the limb the
@@ -58,19 +68,18 @@ namespace Kinex.MegaDance
         {
             string limb = isLeg ? "leg" : "arm";
             float errDeg = errRad * Mathf.Rad2Deg;
-            // amount adverb for up/down ("higher"/"much higher"/"a little higher")
-            string amt = errDeg > 70f ? "much " : errDeg < 30f ? "a little " : "";
+            // amount adverb (" a lot" / " a little" / "")
+            string amt = errDeg > 70f ? " a lot" : errDeg < 30f ? " a little" : "";
             switch (dir)
             {
                 case "up":
-                    return isLeg ? $"Lift your {side} {limb} {amt}higher"
-                                 : $"Raise your {side} {limb} {amt}higher";
+                    return $"Raise your {side} {limb}{amt}.";
                 case "down":
-                    return errDeg > 70f ? $"Drop your {side} {limb} down lower"
-                                        : $"Lower your {side} {limb}";
-                default: // "left" / "right"
-                    return errDeg > 70f ? $"Swing your {side} {limb} to the {dir}"
-                                        : $"Move your {side} {limb} to the {dir}";
+                    return $"Lower your {side} {limb}{amt}.";
+                case "left":
+                    return $"Move your {side} {limb} left{amt}.";
+                default: // "right"
+                    return $"Move your {side} {limb} right{amt}.";
             }
         }
 

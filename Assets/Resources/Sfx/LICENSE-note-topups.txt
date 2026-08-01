@@ -1,0 +1,17 @@
+SFX top-ups added — all CC0 (Kenney.nl "Kenney's Sound Pack", via mirror gamesounds.xyz).
+Kept as .ogg (not .wav) since no local ffmpeg/audio-conversion tool was available in this
+environment; Unity's Resources.Load<AudioClip>(name) does not care about extension, so this
+is functionally identical to the existing .wav files (Sfx.cs loads by name only).
+
+ui_click.ogg  <- Interface Sounds/click_001.ogg
+hit_1.ogg     <- Retro Sounds 2/hit1.ogg
+hit_2.ogg     <- Retro Sounds 2/hit3.ogg
+hit_3.ogg     <- Retro Sounds 2/hit5.ogg
+shield.ogg    <- Sci-Fi Sounds/forceField_000.ogg
+dodge.ogg     <- Retro Sounds 1/jump2.ogg          (quick arcade blip, closest CC0 fit for a dodge whoosh)
+heal.ogg      <- Digital Audio/powerUp3.ogg
+levelup.ogg   <- Retro Sounds 2/upgrade2.ogg
+defeat.ogg    <- Retro Sounds 2/gameover1.ogg
+fanfare.ogg   <- Music Jingles/Audio (Steeldrum)/jingles-steel_00.ogg
+
+Source: https://kenney.nl (CC0) mirrored at https://gamesounds.xyz/?dir=Kenney%27s+Sound+Pack

@@ -34,7 +34,7 @@ namespace Kinex.MegaDance
             if (busy)
             {
                 statusText.color = Dark;
-                statusText.text = "Calibrating… hold your T-pose";
+                statusText.text = "กำลังปรับเทียบ… ค้างท่าตัว T ไว้";
                 if (countdownText != null)
                     countdownText.text = phase == MediaPipePoseDetector.CalibState.Counting
                         ? Mathf.CeilToInt(detector.CalibrationCountdown).ToString()
@@ -43,13 +43,13 @@ namespace Kinex.MegaDance
             else if (detector.IsCalibrated)
             {
                 statusText.color = Green;
-                statusText.text = "Calibrated! ✓  Press Calibrate to redo.";
+                statusText.text = "ปรับเทียบเสร็จแล้ว! ✓  กดปรับเทียบเพื่อทำใหม่";
                 if (countdownText != null) countdownText.text = "";
             }
             else
             {
                 statusText.color = Dark;
-                statusText.text = "Stand in a T-pose (full body in view), then press Calibrate.";
+                statusText.text = "ยืนท่าตัว T (ให้เห็นเต็มตัว) แล้วกดปรับเทียบ";
                 if (countdownText != null) countdownText.text = "";
             }
         }

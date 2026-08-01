@@ -1,0 +1,42 @@
+Alternative character models for Kinex Battle Game character swap-in / shop.
+
+Source: Quaternius — "Ultimate Modular Women Pack" and "Ultimate Modular Men Pack"
+Pack pages:  https://quaternius.com/packs/ultimatemodularwomen.html
+             https://quaternius.com/packs/ultimatemodularcharacters.html
+Author page: https://quaternius.com/
+License:     CC0 1.0 Universal (Public Domain) — https://creativecommons.org/publicdomain/zero/1.0/
+             Free for personal and commercial use, no attribution required.
+
+Files (each a single combined mesh + its own humanoid skeleton, from the pack's
+"Individual Characters/FBX" folder — NOT the split Body/Feet/Head/Legs variant):
+  - Casual_Female.fbx  — Women pack, "Casual" outfit
+  - Casual_Male.fbx    — Men pack, "Casual" outfit
+  - Worker_Female.fbx  — Women pack, "Worker" outfit
+
+Why this pack and not the first one tried (Quaternius "Ultimate Animated Character
+Pack"): that pack's rig splits FK/IK control bones (a Rigify-style Blender export)
+so "Foot.L"/"Foot.R" are NOT parented under the leg chain (LowerLeg.L/R) — Unity's
+Humanoid Avatar requires the foot to be a hierarchical descendant of the lower leg,
+so it can never auto-map ("Required human bone 'LeftFoot' not found") regardless of
+name overrides. Verified via a throwaway scratch-folder import test before committing
+to this pack. The Modular Women/Men packs explicitly ship a clean single-chain
+Humanoid-compatible skeleton (they even include a reference "Humanoid Rig.fbx") and
+every "Individual Characters" outfit re-uses it — confirmed by test-importing
+Casual_Women.fbx, Worker_Women.fbx and Casual_Men.fbx and checking
+Avatar.isValid && Avatar.isHuman all come back true.
+
+Downloaded directly from each pack's public Google Drive folder linked on the
+Quaternius pack pages above (file IDs, for traceability):
+  Casual_Female.fbx (Women/Individual Characters/FBX/Casual.fbx)
+    -> drive id 1oeUCKrPzsKRv9t8gpe2kF0Ps_azVFRdf
+  Worker_Female.fbx (Women/Individual Characters/FBX/Worker.fbx)
+    -> drive id 1m2-hgysb7xhh3dfECiRnf5IYlc2GfI5P
+  Casual_Male.fbx (Men/Individual Characters/FBX/Casual.fbx)
+    -> drive id 1yYfYKaOp-yPrpMQ_Am2bBIC-E7MTbffs
+
+Import settings: Model Importer animationType must be Human (avatarSetup =
+Create From This Model) — set via Assets/Editor/AltCharacterImportSetup.cs, not
+manually — so MediaPipePoseDetector's HumanBodyBones driver works identically to
+Assets/Characters/KinexUserModel.fbx. Run via menu Kinex > Setup Alt Character
+Imports (or batch: -executeMethod Kinex.EditorTools.AltCharacterImportSetup.Run)
+whenever a new file is added to this folder.

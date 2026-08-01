@@ -24,6 +24,17 @@ public class PoseSkeletonOverlay : Graphic
     public Color jointColor = new Color(1f, 0f, 0.8f, 1f);
     public Color headColor = new Color(1f, 0.85f, 0.2f, 1f);
 
+    [Header("Confidence colors (Motion Lab)")]
+    [Tooltip("Color joints/bones by tracking confidence instead of the flat style colors: green = " +
+             "solid, amber = shaky, red = barely seen. Doubles as per-limb visibility feedback. " +
+             "Off by default so existing scenes keep their look.")]
+    public bool confidenceColors = false;
+    public Color confidentColor = new Color(0.25f, 1f, 0.45f, 0.95f);
+    public Color shakyColor = new Color(1f, 0.8f, 0.2f, 0.95f);
+    public Color weakColor = new Color(1f, 0.3f, 0.25f, 0.95f);
+
+    Color ConfColor(float c) => c >= 0.7f ? confidentColor : (c >= 0.5f ? shakyColor : weakColor);
+
     [Tooltip("Rotate the drawn skeleton (degrees, multiple of 90) to counter the Android camera " +
              "preview's quarter-turn so it lands upright on the body. Android only; 0 in editor. " +
              "270 cancels the preview's clockwise 90; try 90 if it ends up upside-down.")]
@@ -72,9 +83,13 @@ public class PoseSkeletonOverlay : Graphic
         // sideways) and THIS overlay is its child, so an upright skeleton would be drawn sideways.
         // We counter that by rotating the mapped points by `previewRotateCW`. The editor/webcam preview
         // isn't rotated, so rot stays 0 there and we map straight through (head at top).
+        // previewRotateCW is the fixed quarter-turn that lands the skeleton on the Android preview;
+        // OrientationExtraRotationCW adds Task A's device-orientation correction (e.g. +180 when the
+        // tablet is flipped) so the skeleton stays matched to the orientation-corrected preview.
         int rot = 0;
 #if UNITY_ANDROID && !UNITY_EDITOR
-        rot = ((previewRotateCW % 360) + 360) % 360;
+        int extra = source != null ? source.OrientationExtraRotationCW : 0;
+        rot = (((previewRotateCW + extra) % 360) + 360) % 360;
 #endif
         bool quarter = rot == 90 || rot == 270;
         // A quarter turn swaps the rect's W/H back to the original on-screen box.
@@ -87,7 +102,10 @@ public class PoseSkeletonOverlay : Graphic
             float u = (p.x - off.x) / Mathf.Max(scl.x, 1e-4f);
             float v = (p.y - off.y) / Mathf.Max(scl.y, 1e-4f);
 #if UNITY_ANDROID && !UNITY_EDITOR
-            if (mirrorSkeletonX) u = 1f - u; // selfie mirror so the skeleton matches the avatar/body
+            // selfie mirror so the skeleton matches the avatar/body, inverted when the orientation
+            // correction (Task A) flips the preview's mirror axis.
+            bool inv = source != null && source.OrientationInvertMirror;
+            if (mirrorSkeletonX ^ inv) u = 1f - u;
 #endif
             if (rot == 0)
                 return new Vector2(r.xMin + u * r.width, r.yMin + v * r.height);
@@ -107,18 +125,22 @@ public class PoseSkeletonOverlay : Graphic
         }
 
         bool Vis(int i) => conf == null || i >= conf.Length || conf[i] >= minVisibility;
+        float Conf(int i) => conf == null || i >= conf.Length ? 1f : conf[i];
 
         for (int c = 0; c < CONNECTIONS.GetLength(0); c++)
         {
             int a = CONNECTIONS[c, 0], b = CONNECTIONS[c, 1];
-            if (Vis(a) && Vis(b)) AddLine(vh, Map(a), Map(b), lineThickness, lineColor);
+            if (!Vis(a) || !Vis(b)) continue;
+            Color col = confidenceColors ? ConfColor(Mathf.Min(Conf(a), Conf(b))) : lineColor;
+            AddLine(vh, Map(a), Map(b), lineThickness, col);
         }
 
         foreach (int j in JOINTS)
         {
             if (!Vis(j)) continue;
             float rad = j == NOSE ? jointRadius * 1.6f : jointRadius;
-            AddQuad(vh, Map(j), rad, j == NOSE ? headColor : jointColor);
+            Color col = confidenceColors ? ConfColor(Conf(j)) : (j == NOSE ? headColor : jointColor);
+            AddQuad(vh, Map(j), rad, col);
         }
     }
 

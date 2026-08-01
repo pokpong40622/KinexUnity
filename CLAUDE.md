@@ -377,6 +377,24 @@ Never commit directly to:
 
 main
 
+---
+
+## Change Log
+
+### 2026-06-29 — Hardware Guide SKIP + Home EMG Warning + UI Fixes (Flutter)
+
+- **Hardware guide skip flow** (`hardware_guide_page.dart`): "ข้ามขั้นตอนนี้" button on welcome screen + "ข้าม" header button during install/measure steps; confirm dialog before skip. Pop contract: finish=`context.pop(true)`, skip=`pop(context,'skipped')`, dismissed=null.
+- **Home EMG warning** (`home_page.dart`): reads push result; if result is not `true` shows AlertDialog "ยังไม่ได้ติดตั้งแผ่น EMG" with ติดตั้งตอนนี้ (re-open guide) / ภายหลัง actions.
+- **EMG result colour fix** (`hardware_guide_page.dart`): both ขาซ้าย (L) and ขาขวา (R) result text now use `KColors.blue` (left was `greenDark`).
+- **Spotlight first-frame fix** (`home_page.dart`): `_SpotlightOverlay._scheduleMeasure` waits an extra post-frame so `FractionallySizedBox` layout settles before `localToGlobal`.
+- Debug APK built + installed RZCT40QHV9B. `flutter analyze` clean (pre-existing `_QuestCard.onTap` warning only). Nothing committed.
+
+### 2026-06-29 — EMG Banner + Pad-Muscle Mapping Correction (Flutter)
+
+- **EMG reminder banner** (`home_page.dart`): replaced one-shot AlertDialog with persistent amber strip `_EmgReminderBanner` ("ยังไม่ได้ติดตั้งแผ่น EMG — แตะเพื่อติดตั้ง"); visibility gated on `mvcCalibrationProvider` — shows when no/incomplete calibration, auto-hides once calibrated; tap → /hardware-guide.
+- **Pad→muscle mapping corrected** (`hardware_guide_page.dart`): `_padMuscles` now `[vl, bf, ta, gcm]` = R1=VL, R2=BF, R3=TA, R4=GCM; step labels show R# · code · thaiName.
+- Debug APK built + installed RZCT40QHV9B. `flutter analyze` clean (pre-existing `_QuestCard.onTap` warning only). Nothing committed. Pending on-device verify: banner placement (must not block buttons) + corrected R# labels.
+
 Main must always remain deployable.
 
 ---

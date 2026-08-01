@@ -32,25 +32,25 @@ public class CalibrationUI : MonoBehaviour
         {
             case MediaPipePoseDetector.CalibState.Prompting:
                 ShowOverlay(true);
-                _topText.text  = "CALIBRATION";
+                _topText.text  = "ปรับเทียบ";
                 _countText.text = "";
-                _subText.text  = "Stand in T-Pose\nArms straight out → feet together\nHold still...";
+                _subText.text  = "ยืนท่าตัว T\nกางแขนตรงออก → เท้าชิดกัน\nอยู่นิ่ง ๆ...";
                 break;
 
             case MediaPipePoseDetector.CalibState.Counting:
                 ShowOverlay(true);
-                _topText.text   = "Hold T-Pose";
+                _topText.text   = "ค้างท่าตัว T";
                 _countText.text = Mathf.CeilToInt(detector.CalibrationCountdown).ToString();
-                _subText.text   = "Averaging your body shape...";
+                _subText.text   = "กำลังเฉลี่ยรูปร่างของคุณ...";
                 break;
 
             case MediaPipePoseDetector.CalibState.Done:
                 ShowOverlay(true);
-                _topText.text   = detector.IsCalibrated ? "Ready!" : "Try Again";
+                _topText.text   = detector.IsCalibrated ? "พร้อม!" : "ลองอีกครั้ง";
                 _countText.text = detector.IsCalibrated ? "✓" : "!";
                 _subText.text   = detector.IsCalibrated
-                    ? "Calibration complete"
-                    : "Not enough data — stay in frame next time";
+                    ? "ปรับเทียบเสร็จสมบูรณ์"
+                    : "ข้อมูลไม่พอ — คราวหน้าอยู่ในกรอบกล้องนะครับ";
                 break;
 
             default:
