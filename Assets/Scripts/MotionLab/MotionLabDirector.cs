@@ -125,7 +125,7 @@ namespace Kinex.MotionLab
             // Consume AND clear the pending value so a later normal Motion Lab run isn't coached.
             string coachPose = Kinex.App.SceneRouter.PendingCoachPose;
             Kinex.App.SceneRouter.PendingCoachPose = "";
-            if (coachPose == "hip_abduction") { EnterCoachMode(); return; }
+            if (!string.IsNullOrEmpty(coachPose) && EnterCoachMode(coachPose)) return;
 
             EnterFraming();
         }
@@ -134,8 +134,17 @@ namespace Kinex.MotionLab
         // a game"). The 3D avatar is hidden; a full-screen camera preview is built at runtime; the
         // coach emits cue IDs to Flutter, which draws the Thai UI + speech on top (these runtime-built
         // Unity panels have no Thai font budget, and Flutter owns all wording).
-        void EnterCoachMode()
+        // Returns false for an unknown pose id so Start() can fall back to the normal test range
+        // rather than showing a camera view with no coach attached to it.
+        bool EnterCoachMode(string poseId)
         {
+            var coach = PoseCoachFactory.Attach(gameObject, poseId);
+            if (coach == null)
+            {
+                Debug.LogWarning($"[MotionLab] Unknown coach pose '{poseId}' — running the normal test range.");
+                return false;
+            }
+
             _coachMode = true;
             if (framingPanel != null) framingPanel.SetActive(false);
             if (hudPanel != null) hudPanel.SetActive(false);
@@ -153,8 +162,8 @@ namespace Kinex.MotionLab
 
             BuildCoachCameraView();
 
-            var coach = gameObject.AddComponent<HipAbductionCoach>();
             coach.poseDetector = poseDetector;
+            return true;
         }
 
         // Full-screen live camera preview + skeleton overlay, built at runtime because MotionLabScene
@@ -198,7 +207,7 @@ namespace Kinex.MotionLab
 
         void Update()
         {
-            if (_coachMode) return; // HipAbductionCoach owns the frame in coach mode
+            if (_coachMode) return; // the PoseCoachBase subclass owns the frame in coach mode
             float dt = Time.deltaTime;
             TickMotion(dt);
 
