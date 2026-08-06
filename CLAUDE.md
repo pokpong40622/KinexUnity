@@ -377,25 +377,10 @@ Never commit directly to:
 
 main
 
----
-
-## Change Log
-
-### 2026-06-29 — Hardware Guide SKIP + Home EMG Warning + UI Fixes (Flutter)
-
-- **Hardware guide skip flow** (`hardware_guide_page.dart`): "ข้ามขั้นตอนนี้" button on welcome screen + "ข้าม" header button during install/measure steps; confirm dialog before skip. Pop contract: finish=`context.pop(true)`, skip=`pop(context,'skipped')`, dismissed=null.
-- **Home EMG warning** (`home_page.dart`): reads push result; if result is not `true` shows AlertDialog "ยังไม่ได้ติดตั้งแผ่น EMG" with ติดตั้งตอนนี้ (re-open guide) / ภายหลัง actions.
-- **EMG result colour fix** (`hardware_guide_page.dart`): both ขาซ้าย (L) and ขาขวา (R) result text now use `KColors.blue` (left was `greenDark`).
-- **Spotlight first-frame fix** (`home_page.dart`): `_SpotlightOverlay._scheduleMeasure` waits an extra post-frame so `FractionallySizedBox` layout settles before `localToGlobal`.
-- Debug APK built + installed RZCT40QHV9B. `flutter analyze` clean (pre-existing `_QuestCard.onTap` warning only). Nothing committed.
-
-### 2026-06-29 — EMG Banner + Pad-Muscle Mapping Correction (Flutter)
-
-- **EMG reminder banner** (`home_page.dart`): replaced one-shot AlertDialog with persistent amber strip `_EmgReminderBanner` ("ยังไม่ได้ติดตั้งแผ่น EMG — แตะเพื่อติดตั้ง"); visibility gated on `mvcCalibrationProvider` — shows when no/incomplete calibration, auto-hides once calibrated; tap → /hardware-guide.
-- **Pad→muscle mapping corrected** (`hardware_guide_page.dart`): `_padMuscles` now `[vl, bf, ta, gcm]` = R1=VL, R2=BF, R3=TA, R4=GCM; step labels show R# · code · thaiName.
-- Debug APK built + installed RZCT40QHV9B. `flutter analyze` clean (pre-existing `_QuestCard.onTap` warning only). Nothing committed. Pending on-device verify: banner placement (must not block buttons) + corrected R# labels.
-
 Main must always remain deployable.
+
+(There is no change log in this file. It was maintained for two days in June and then abandoned
+while the session log kept running — one history, not two. See **Progress Logging** below.)
 
 ---
 
@@ -478,19 +463,12 @@ Never rollback automatically.
 
 # Release Management
 
-Maintain:
+There is no separate release log. The session log plus git history serve this purpose, and a
+mandated file that nobody maintains is worse than no file. (`docs/releases/*.md` was specified
+here for two months and never created once.)
 
-docs/releases/flutter_releases.md
-
-docs/releases/unity_releases.md
-
-Each release includes:
-
-* Version
-* Date
-* Commit Hash
-* Summary
-* Known Issues
+When a build actually ships to the device, the handoff block records the APK size, the commit
+hashes in both repos, and what was verified on the phone. That is the release record.
 
 ---
 
@@ -511,26 +489,34 @@ Include:
 
 # Progress Logging
 
-File:
+History is written at **handoff time**, not after every edit.
 
-C:\Users\Admin.claude\projects\D--Unity-project-Kinex\memory\session_state.md
+Run `/handoff` at the end of a work block. It writes two things:
 
-Update whenever:
+1. An **ephemeral handoff doc** in the OS temp dir — for the next agent to pick up mid-task.
+2. A **permanent block** in the session log — the durable project history.
 
-* Feature completed
-* File modified
-* Architecture changed
-* Bug fixed
-* Task switched
-* Blocker identified
+Files:
 
-Include:
+* Live log — `C:\Users\Admin\.claude\projects\D--Unity-project-Kinex\memory\session_state.md`
+  (newest ~14 blocks only)
+* Archive — `C:\Users\Admin\.claude\projects\D--Unity-project-Kinex\memory\history\YYYY-MM.md`
+  (older blocks, not auto-loaded, grep when needed)
 
-* What changed
-* Files affected
-* Current status
-* Blockers
-* Next steps
+A block includes:
+
+* Which repo and branch
+* What changed and **why** (the diff already has the what)
+* Files affected, with new class/provider names
+* Validation results — analyze / test counts, or Unity self-test
+* Device verification — or an explicit "not verified"
+* Commit status and hashes
+* 🐛 Found but not fixed, with the reason
+* ⚠ Landmines for whoever touches this next
+
+**Write immediately, without waiting for handoff, only for landmines** — a gotcha that will cost
+someone a 25-minute re-export to rediscover goes into its own memory file the moment it is found.
+Everything else waits for `/handoff`.
 
 ---
 
