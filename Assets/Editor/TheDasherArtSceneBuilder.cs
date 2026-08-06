@@ -235,6 +235,21 @@ namespace Kinex.TheDasher.EditorTools
                 foreach (var browName in new[] { "may_l", "may_r", "mi_l", "mi_r" })
                     ApplyBodyMaterial(model, browName, browTone, 0.2f, "BrowLashDark");
 
+                // The camera sits BEHIND this character and never moves, so the face interior is
+                // pure cost: eyes, eyelashes, brows, teeth and tongue are 9,000 tris that can
+                // never be seen, and each one was also a separate shadow-caster submission. They
+                // still RENDER (a future result screen or camera orbit would need them) — only
+                // their shadow casting is dropped, which is invisible: the head's own silhouette
+                // is cast by "mat" and "toc1" regardless.
+                foreach (var part in new[] { "eyes_l", "eyes_r", "mi_l", "mi_r", "may_l", "may_r",
+                                             "rangtren", "rangduoi", "luoi", "light_l", "light_r" })
+                {
+                    var t = FindChildRecursive(model.transform, part);
+                    if (t == null) continue;
+                    var pr = t.GetComponent<Renderer>();
+                    if (pr != null) pr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                }
+
                 RescaleAndGroundAvatar(model, player.transform);
                 avatarAnimator = model.GetComponent<Animator>();
             }
@@ -345,6 +360,36 @@ namespace Kinex.TheDasher.EditorTools
             flutter4.transform.SetParent(parent, false);
 
             CullOffscreen(parent);
+            MarkStaticBatchable(parent);
+        }
+
+        // Nothing in this stage was flagged static, so Unity was re-submitting every hill, ridge,
+        // rock, bush and background tree as its own draw call — on a scene whose camera is bolted
+        // to one spot. Static-batch everything that genuinely never moves.
+        //
+        // The test is deliberately structural rather than a name list: a prop qualifies only if it
+        // carries nothing but Transform/MeshFilter/MeshRenderer. That automatically excludes the
+        // roadside trees (GentleSway breeze), the butterflies, the birds and the pollen system,
+        // and it stays correct if someone later adds a script to a prop — a name list would not.
+        static void MarkStaticBatchable(Transform stage)
+        {
+            int marked = 0, moving = 0;
+            foreach (var r in stage.GetComponentsInChildren<MeshRenderer>(true))
+            {
+                var go = r.gameObject;
+                bool onlyStaticParts = true;
+                foreach (var c in go.GetComponents<Component>())
+                {
+                    if (c is Transform || c is MeshFilter || c is MeshRenderer) continue;
+                    onlyStaticParts = false;
+                    break;
+                }
+                if (!onlyStaticParts) { moving++; continue; }
+                GameObjectUtility.SetStaticEditorFlags(go,
+                    StaticEditorFlags.BatchingStatic | StaticEditorFlags.OccluderStatic | StaticEditorFlags.OccludeeStatic);
+                marked++;
+            }
+            Debug.Log($"[TheDasherArtSceneBuilder] static-batched {marked} props ({moving} left dynamic — animated)");
         }
 
         // Delete every stage prop the play camera can never see. The Dasher camera is bolted to one
@@ -1193,6 +1238,85 @@ namespace Kinex.TheDasher.EditorTools
         /// <paramref name="castShadow"/> also controls receiveShadows (both on or both off) per
         /// the near/far shadow budget (Stage 3: only objects within ~15m of the camera cast/receive).
         /// </summary>
+        // ---- GLB material conversion ------------------------------------------------------
+        // The Quaternius GLBs arrive with Shader Graph glTF-pbrMetallicRoughness materials, and
+        // every foliage one is ALPHA-BLENDED (render queue 3000, alphaCutoff 0). That is wrong
+        // three ways on a phone: blended geometry writes no depth, so ~90 dense canopies pile up
+        // enormous overdraw next to MediaPipe's inference budget; blended geometry does not cast
+        // or receive proper shadows, which is why the whole park rendered without a single one;
+        // and it sorts per object, so canopies flicker against each other.
+        //
+        // Their textures are also glb SUB-ASSETS. A .glb is read by GLTFast's ScriptedImporter,
+        // so those textures have no TextureImporter and therefore no compression settings at all:
+        // they shipped as ARGB32, ~102 MB of VRAM (Rocks alone was 43 MB at 2048²). Extracted
+        // copies now live in Textures/Extracted as normal PNGs at 512² ASTC_6x6 — 1.55 MB total.
+        //
+        // So rebuild each glb material as URP/Lit against the extracted textures. PropMeshes.Mat
+        // additionally kills environment reflections + specular highlights, which is what was
+        // blowing the canopies out into white glowing patches under Bloom.
+        static readonly Dictionary<string, (string tex, string normal, bool cutout)> GlbMaterialMap =
+            new Dictionary<string, (string, string, bool)>
+            {
+                { "NormalTree_Bark",   ("NormalTree_Bark",   "NormalTree_Bark_Normal", false) },
+                { "NormalTree_Leaves", ("NormalTree_Leaves", null,                     true)  },
+                { "MapleTree_Bark",    ("MapleTree_Bark",    "MapleTree_Bark_Normal",  false) },
+                { "MapleTree_Leaves",  ("MapleTree_Leaves",  null,                     true)  },
+                { "Bush_Leaves",       ("Bush_Leaves",       null,                     true)  },
+                { "Flowers",           ("Flowers",           null,                     true)  },
+                { "Grass",             ("Grass",             null,                     false) }, // measured: zero transparent texels
+                { "Rock",              ("Rocks",             null,                     false) },
+            };
+
+        const string ExtractedTexFolder = "Assets/TheDasherArt/Textures/Extracted/";
+        static readonly Dictionary<string, Material> ConvertedGlbMats = new Dictionary<string, Material>();
+
+        static Material[] ConvertGlbMaterials(Material[] src)
+        {
+            var result = new Material[src.Length];
+            for (int i = 0; i < src.Length; i++)
+            {
+                var s = src[i];
+                if (s == null) continue;
+                if (!GlbMaterialMap.TryGetValue(s.name, out var entry)) { result[i] = s; continue; }
+                if (ConvertedGlbMats.TryGetValue(s.name, out var cached)) { result[i] = cached; continue; }
+
+                var mat = PropMeshes.Mat(Color.white, metallic: 0f, smooth: entry.cutout ? 0.06f : 0.10f);
+                mat.name = s.name;
+
+                var diff = AssetDatabase.LoadAssetAtPath<Texture2D>(ExtractedTexFolder + entry.tex + ".png");
+                if (diff != null && mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", diff);
+                if (entry.normal != null)
+                {
+                    var nrm = AssetDatabase.LoadAssetAtPath<Texture2D>(ExtractedTexFolder + entry.normal + ".png");
+                    if (nrm != null && mat.HasProperty("_BumpMap"))
+                    {
+                        mat.SetTexture("_BumpMap", nrm);
+                        mat.EnableKeyword("_NORMALMAP");
+                        mat.SetFloat("_BumpScale", 0.8f);
+                    }
+                }
+
+                if (entry.cutout)
+                {
+                    // Alpha CLIP, not blend — keeps the depth write, so the canopy occludes
+                    // properly, casts a real shadow, and costs one pass instead of sorted overdraw.
+                    mat.SetFloat("_AlphaClip", 1f);
+                    mat.EnableKeyword("_ALPHATEST_ON");
+                    mat.SetFloat("_Cutoff", 0.5f);
+                    mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.AlphaTest;
+                    // These leaf textures are ~64% fully transparent texels: the foliage is built
+                    // from CARDS, and a card seen from its back face was being culled away. That
+                    // is what made scattered trees look bare and dead. Draw both faces.
+                    mat.SetFloat("_Cull", (float)UnityEngine.Rendering.CullMode.Off);
+                    mat.doubleSidedGI = true;
+                }
+
+                ConvertedGlbMats[s.name] = mat;
+                result[i] = mat;
+            }
+            return result;
+        }
+
         static GameObject SpawnGlbMesh(string glbPath, string meshName, Transform parent, Vector3 localPos,
             Quaternion localRot, float scaleMul, bool castShadow, string nameOverride = null, float embed = 0f)
         {
@@ -1223,7 +1347,7 @@ namespace Kinex.TheDasher.EditorTools
             var newMf = go.AddComponent<MeshFilter>();
             newMf.sharedMesh = mf.sharedMesh;
             var newMr = go.AddComponent<MeshRenderer>();
-            newMr.sharedMaterials = mr.sharedMaterials;
+            newMr.sharedMaterials = ConvertGlbMaterials(mr.sharedMaterials);
             newMr.shadowCastingMode = castShadow ? UnityEngine.Rendering.ShadowCastingMode.On : UnityEngine.Rendering.ShadowCastingMode.Off;
             newMr.receiveShadows = castShadow;
             newMr.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
