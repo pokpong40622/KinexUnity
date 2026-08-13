@@ -54,6 +54,12 @@ namespace Kinex.TheDasher.EditorTools
         const string GrassNormPath = "Assets/TheDasherArt/Textures/Ground/leafy_grass_nor_1k.jpg";
         const string DirtDiffPath = "Assets/TheDasherArt/Textures/Ground/park_dirt_diff_1k.jpg";
         const string DirtNormPath = "Assets/TheDasherArt/Textures/Ground/park_dirt_nor_1k.jpg";
+        // Stayed on the blue midday sky ON PURPOSE. A golden-hour HDRI was downloaded and tried
+        // (kloppenheim_06 and belfast_sunset, both CC0): both turned the shot drearier, not
+        // prettier — the canopy hides most of the sky anyway, so all you get is a grey-white
+        // overcast band and duller greens. This is a sunny-park rehab game for older users; the
+        // blue reads inviting. The low warm SUN is kept, which is where the beauty actually came
+        // from.
         const string SkyHdrPath = "Assets/TheDasherArt/Sky/kloofendal_48d_partly_cloudy_puresky_1k.hdr";
         // Procedural skyline meshes must be saved as assets — a Mesh built in the builder and only
         // referenced by a MeshFilter is not persisted and comes back null after a scene reload.
@@ -63,7 +69,7 @@ namespace Kinex.TheDasher.EditorTools
         // budget line) works out to world z < ~11. Anything placed past this stays shadow-off.
         const float NearShadowZ = 11f;
 
-        static readonly Color SkyPale = new Color(0.74f, 0.86f, 0.96f); // fog colour, matches the HDRI's pale midday horizon
+        static readonly Color SkyPale = new Color(0.84f, 0.86f, 0.90f); // fog colour: pale, faintly warm, still sky-blue
 
         // 10 tree variants (5 broadleaf + 5 maple) — picked deterministically by index so roadside
         // rows and the background forest both read as mixed woodland, not a single repeated mesh.
@@ -145,31 +151,50 @@ namespace Kinex.TheDasher.EditorTools
             camGo.AddComponent<AudioListener>();
             cam.GetUniversalAdditionalCameraData().renderPostProcessing = true;
 
-            // ---- Lights (back view!): key from behind-left-above the camera lights the
-            // avatar's BACK, fill sits near the camera, rim points back toward the camera from
-            // +Z to catch a silhouette edge on the avatar. ----
+            // ---- Lights: late-afternoon sun, SIDE-ON. ----
+            // Sun angle is dictated by the FRAME, not by taste. This is a narrow portrait shot
+            // (aspect ~0.56-0.65) whose visible width near the camera is barely a metre, so:
+            //   - the old key at 48 deg from BEHIND the camera cast every shadow behind the object
+            //     making it — invisible by construction;
+            //   - a side sun (probed at yaw 118) throws shadows sideways, and they leave the frame
+            //     within about half a metre.
+            // Only a low sun roughly BEHIND the scene puts shadows where the camera can see them:
+            // they stretch back toward the lens, down the long axis of the frame. Verified by
+            // probe at each angle, not reasoned about.
+            //
+            // Backlight normally silhouettes the subject, and an early probe did exactly that —
+            // but that probe had the fill light disabled. With FillLight raised to 1.15 the
+            // avatar stays fully readable while the park behind it gets its long shadows.
             var keyGo = new GameObject("KeyLight");
             var key = keyGo.AddComponent<Light>();
             key.type = LightType.Directional;
-            key.intensity = 1.45f;
-            key.color = new Color(1.0f, 0.97f, 0.88f); // warm sunlight
-            keyGo.transform.rotation = Quaternion.Euler(48f, -28f, 0f);
+            key.intensity = 2.1f;
+            key.color = new Color(1.0f, 0.90f, 0.76f); // low-sun warmth
+            keyGo.transform.rotation = Quaternion.Euler(22f, 200f, 0f);
             key.shadows = LightShadows.Soft;
-            key.shadowStrength = 0.45f;
+            key.shadowStrength = 0.8f;   // was 0.45 — at that strength the ambient simply ate it
+            key.shadowBias = 0.03f;
+            key.shadowNormalBias = 0.25f;
 
+            // Load-bearing, not decorative: the key is now a backlight, so this is the ONLY thing
+            // keeping the avatar from reading as a silhouette. Cool, to sit opposite the warm key —
+            // the colour split is what stops the shading going grey.
             var fillGo = new GameObject("FillLight");
             var fill = fillGo.AddComponent<Light>();
             fill.type = LightType.Point;
-            fill.color = new Color(0.78f, 0.86f, 1f); // soft sky fill
-            fill.intensity = 0.9f;
+            fill.color = new Color(0.70f, 0.80f, 1f);
+            fill.intensity = 1.15f;
             fill.range = 12f;
-            fillGo.transform.position = new Vector3(0f, 2.0f, -3.2f);
+            fillGo.transform.position = new Vector3(-1.2f, 2.1f, -3.4f);
 
             var rimGo = new GameObject("RimLight");
             var rim = rimGo.AddComponent<Light>();
             rim.type = LightType.Directional;
             rim.color = new Color(1.0f, 0.96f, 0.86f);
-            rim.intensity = 0.5f;
+            // Held down to 0.25. Rim is a SHADOWLESS directional, so every point it touches gets
+            // lit whether or not the sun reaches it — at 0.5 against a key of 2.1 it was filling
+            // ~24% straight back into every shadow and flattening the scene out again.
+            rim.intensity = 0.25f;
             rim.shadows = LightShadows.None;
             rimGo.transform.rotation = Quaternion.Euler(20f, 180f, 0f);
 
@@ -359,8 +384,99 @@ namespace Kinex.TheDasher.EditorTools
             var flutter4 = Butterfly.Spawn(new Vector3(2.6f, 1.5f, 4.2f), new Vector3(1.1f, 0.7f, 1.3f), new Color(1f, 0.85f, 0.35f));
             flutter4.transform.SetParent(parent, false);
 
+            BuildSala(parent);              // landmark closing the avenue
+
             CullOffscreen(parent);
             MarkStaticBatchable(parent);
+        }
+
+        // The avenue used to lead to nothing: the eye ran down the lanes, past the trees, and
+        // landed on empty lawn. A sala (ศาลา) — the open pavilion in every Thai park — sits at the
+        // vanishing point and gives it a destination. Built from primitives rather than downloaded
+        // because at ~44 m it is barely 13% of frame height: silhouette is all that survives, and a
+        // silhouette costs ~250 tris. It also carries the scene's only warm colour accent besides
+        // the one red maple.
+        static void BuildSala(Transform parent)
+        {
+            var root = new GameObject("Sala");
+            root.transform.SetParent(parent, false);
+            const float z = 44f;
+            root.transform.localPosition = new Vector3(0f, HillHeightAt(0f, z), z);
+
+            var timber = PropMeshes.Mat(new Color(0.42f, 0.29f, 0.19f), 0f, 0.10f);
+            timber.name = "SalaTimber";
+            var roofMat = PropMeshes.Mat(new Color(0.60f, 0.17f, 0.14f), 0f, 0.12f); // temple red
+            roofMat.name = "SalaRoof";
+            var trimMat = PropMeshes.Mat(new Color(0.83f, 0.66f, 0.28f), 0f, 0.25f); // gold trim
+            trimMat.name = "SalaTrim";
+
+            var deck = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            deck.name = "SalaDeck";
+            DestroyColliderSafe(deck);
+            deck.transform.SetParent(root.transform, false);
+            deck.transform.localPosition = new Vector3(0f, 0.25f, 0f);
+            deck.transform.localScale = new Vector3(6f, 0.5f, 6f);
+            deck.GetComponent<Renderer>().sharedMaterial = timber;
+
+            for (int i = 0; i < 4; i++)
+            {
+                float px = (i < 2 ? -1f : 1f) * 2.4f;
+                float pz = (i % 2 == 0 ? -1f : 1f) * 2.4f;
+                var post = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                post.name = "SalaPost";
+                DestroyColliderSafe(post);
+                post.transform.SetParent(root.transform, false);
+                post.transform.localPosition = new Vector3(px, 1.9f, pz);
+                post.transform.localScale = new Vector3(0.3f, 1.4f, 0.3f); // cylinder is 2 units tall
+                post.GetComponent<Renderer>().sharedMaterial = timber;
+            }
+
+            // Two-tier hip roof + finial. Tiering is what reads as "Thai" at this distance —
+            // a single pyramid reads as a tent.
+            AddPyramid(root.transform, "SalaRoofLower", new Vector3(0f, 3.3f, 0f), 7.2f, 1.5f, roofMat);
+            AddPyramid(root.transform, "SalaRoofUpper", new Vector3(0f, 4.5f, 0f), 4.6f, 1.7f, roofMat);
+            var finial = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            finial.name = "SalaFinial";
+            DestroyColliderSafe(finial);
+            finial.transform.SetParent(root.transform, false);
+            finial.transform.localPosition = new Vector3(0f, 6.5f, 0f);
+            finial.transform.localScale = new Vector3(0.16f, 0.7f, 0.16f);
+            finial.GetComponent<Renderer>().sharedMaterial = trimMat;
+
+            foreach (var r in root.GetComponentsInChildren<MeshRenderer>())
+            {
+                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; // 44 m out, past shadow distance anyway
+                r.receiveShadows = false;
+                r.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
+            }
+        }
+
+        // Square pyramid, 6 tris, apex up. Built inline rather than reusing a primitive because
+        // Unity ships no cone/pyramid and a scaled Cylinder reads as a drum at this size.
+        static void AddPyramid(Transform parent, string name, Vector3 localPos, float width, float height, Material mat)
+        {
+            float h = width * 0.5f;
+            var verts = new Vector3[]
+            {
+                new Vector3(-h, 0f, -h), new Vector3(h, 0f, -h), new Vector3(h, 0f, h), new Vector3(-h, 0f, h),
+                new Vector3(0f, height, 0f),
+            };
+            var tris = new int[] { 0,4,1, 1,4,2, 2,4,3, 3,4,0, 0,1,2, 0,2,3 };
+            var mesh = new Mesh { name = name };
+            mesh.SetVertices(new List<Vector3>(verts));
+            mesh.SetTriangles(tris, 0);
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+
+            string path = $"{RidgeMeshFolder}/{name}.asset";
+            AssetDatabase.DeleteAsset(path);
+            AssetDatabase.CreateAsset(mesh, path);
+
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = localPos;
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            go.AddComponent<MeshRenderer>().sharedMaterial = mat;
         }
 
         // Nothing in this stage was flagged static, so Unity was re-submitting every hill, ridge,
@@ -458,15 +574,27 @@ namespace Kinex.TheDasher.EditorTools
                 var shader = Shader.Find("Skybox/Cubemap");
                 var skyMat = new Material(shader) { name = "TheDasherArtSkybox" };
                 skyMat.SetTexture("_Tex", cubemap);
-                skyMat.SetFloat("_Exposure", 1.1f);
+                skyMat.SetFloat("_Exposure", 1.15f);
+                // Spin the cubemap so its baked sun sits roughly where KeyLight is pointing from
+                // (yaw 118), otherwise the sky says one time of day and the shadows say another.
+                skyMat.SetFloat("_Rotation", 200f);
                 AssetDatabase.CreateAsset(skyMat, SkyboxMatPath);
                 RenderSettings.skybox = skyMat;
             }
 
+            // Ambient is deliberately DIMMER than it looks like it should be. The scene used to run
+            // Trilight at full intensity with bright sky colours, and it was drowning the shadows
+            // outright: with a diagnostic near-black ambient the same scene renders long raking
+            // shadows from the avatar and every tree, so nothing was ever broken — the fill was
+            // simply strong enough to erase the contrast that gives the park depth. Verified by
+            // probe, not guessed.
+            // ⚠ ambientIntensity does NOTHING in Trilight mode — it only scales Skybox ambient.
+            // Half an hour went into turning it 0.65 -> 0.45 -> 0.35 with no effect on screen.
+            // In Trilight the COLOURS are the intensity, so darken these instead.
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = new Color(0.62f, 0.72f, 0.86f);
-            RenderSettings.ambientEquatorColor = new Color(0.58f, 0.58f, 0.50f);
-            RenderSettings.ambientGroundColor = new Color(0.30f, 0.34f, 0.22f);
+            RenderSettings.ambientSkyColor = new Color(0.26f, 0.32f, 0.42f);    // cool sky fill
+            RenderSettings.ambientEquatorColor = new Color(0.28f, 0.26f, 0.21f); // warm bounce
+            RenderSettings.ambientGroundColor = new Color(0.12f, 0.11f, 0.08f);
 
             // Outdoor haze so the background forest / verges melt into the horizon instead of
             // ending in a hard line. No opaque dome anymore, so nothing to clip against — the far
@@ -474,8 +602,8 @@ namespace Kinex.TheDasher.EditorTools
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.Linear;
             RenderSettings.fogColor = SkyPale;
-            RenderSettings.fogStartDistance = 40f;
-            RenderSettings.fogEndDistance = 260f;
+            RenderSettings.fogStartDistance = 55f;
+            RenderSettings.fogEndDistance = 235f;
 
             DynamicGI.UpdateEnvironment();
         }

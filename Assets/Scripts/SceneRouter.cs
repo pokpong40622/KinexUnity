@@ -52,7 +52,9 @@ namespace Kinex.App
                     SceneManager.LoadScene("MotionLabScene");
                     break;
                 case "thedasher":
-                    SceneManager.LoadScene("TheDasherScene");
+                    // ⚠ TEMPORARILY pointed at the ART scene so the new environment can be judged
+                    // on the device. Revert = change this one string back to "TheDasherScene".
+                    SceneManager.LoadScene("TheDasherArtScene");
                     break;
                 case "hangglider":
                     SceneManager.LoadScene("HangGliderScene");
