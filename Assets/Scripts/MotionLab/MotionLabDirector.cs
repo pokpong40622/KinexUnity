@@ -162,6 +162,15 @@ namespace Kinex.MotionLab
 
             BuildCoachCameraView();
 
+            // The authored scene carries its own small camera panel (top-right,
+            // 280x360) and an "ออก" pill (top-left). In coach mode both are
+            // duplicates: BuildCoachCameraView has just put a FULL-SCREEN camera
+            // + skeleton behind everything, and Flutter draws its own exit
+            // button over the top. Hide rather than delete — the normal Motion
+            // Lab test range still uses both.
+            HideAuthored("CameraFeedPanel");
+            HideAuthored("ExitButton");
+
             coach.poseDetector = poseDetector;
             return true;
         }
@@ -196,6 +205,15 @@ namespace Kinex.MotionLab
             overlay.confidenceColors = true; // green/amber/red per limb = live "am I tracked" feedback
 
             if (poseDetector != null) poseDetector.SetPreviewSurface(raw);
+        }
+
+        // Looked up by name because MotionLabUIBuilder authors these into the scene
+        // without wiring them to a serialized field (unlike framingPanel/hudPanel).
+        // Null-guarded so a future scene rebuild that drops one cannot break coach mode.
+        static void HideAuthored(string name)
+        {
+            var go = GameObject.Find(name);
+            if (go != null) go.SetActive(false);
         }
 
         static void StretchFull(RectTransform r)

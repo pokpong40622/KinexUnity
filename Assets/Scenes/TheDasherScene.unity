@@ -81055,7 +81055,7 @@ MonoBehaviour:
   avatarAnimator: {fileID: 988617815}
   laneLerpSpeed: 4
   leanDegrees: 7
-  avatarLaneMoveScale: 0.65
+  avatarLaneMoveScale: 1
   sitDipMeters: 0.36
   sitDipSeconds: 0.35
   spawner: {fileID: 1856202460}

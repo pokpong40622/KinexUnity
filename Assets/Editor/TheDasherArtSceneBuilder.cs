@@ -187,16 +187,27 @@ namespace Kinex.TheDasher.EditorTools
             fill.range = 12f;
             fillGo.transform.position = new Vector3(-1.2f, 2.1f, -3.4f);
 
+            // FRONT fill (it used to be a second backlight at yaw 180, pitch 20 — pointing the same
+            // way as the key). With BOTH directionals coming from behind the scene, every surface
+            // FACING THE CAMERA received nothing but ambient: on device and in the headless render
+            // alike, every tree trunk and every low bush read as a flat black silhouette while the
+            // canopies above them were properly lit. That is the "dark / dry" complaint.
+            //
+            // The fix is direction, not exposure. This now points AWAY from the camera (yaw 8) so it
+            // lands on exactly those camera-facing surfaces, and it is deliberately kept ALMOST
+            // HORIZONTAL (pitch 6): the ground normal is straight up, so at this angle the grass
+            // receives ~10% of it and the vertical bark receives ~99%. That opens the trunks without
+            // filling the long raking shadows back in — the failure mode that cost a whole round
+            // when the old rim was tried at 0.5.
             var rimGo = new GameObject("RimLight");
             var rim = rimGo.AddComponent<Light>();
             rim.type = LightType.Directional;
             rim.color = new Color(1.0f, 0.96f, 0.86f);
-            // Held down to 0.25. Rim is a SHADOWLESS directional, so every point it touches gets
-            // lit whether or not the sun reaches it — at 0.5 against a key of 2.1 it was filling
-            // ~24% straight back into every shadow and flattening the scene out again.
-            rim.intensity = 0.25f;
+            // 0.6 turned the trunks from black to dark brown but the near bushes stayed murky; 1.0 is
+            // what actually reads as a lit park. Safe to push this high ONLY because of the 6° pitch.
+            rim.intensity = 1.0f;
             rim.shadows = LightShadows.None;
-            rimGo.transform.rotation = Quaternion.Euler(20f, 180f, 0f);
+            rimGo.transform.rotation = Quaternion.Euler(6f, 8f, 0f);
 
             // ---- Post-processing volume: bloom-forward for the neon lanes/rings. ----
             var volGo = new GameObject("GlobalVolume");
@@ -591,10 +602,18 @@ namespace Kinex.TheDasher.EditorTools
             // ⚠ ambientIntensity does NOTHING in Trilight mode — it only scales Skybox ambient.
             // Half an hour went into turning it 0.65 -> 0.45 -> 0.35 with no effect on screen.
             // In Trilight the COLOURS are the intensity, so darken these instead.
+            // …but it was taken ~20% too far. Device-verified 2026-08-07: the shadows landed
+            // correctly, and the backlit treeline on both sides went nearly black with them.
+            // Lifted 25% from the halved values — enough to open the foliage back up, still
+            // well under the level that erased the raking shadows in the first place.
+            // …and lifted again (+20% on the two lower bands) alongside turning the rim into a front
+            // fill. The equator band is the one that reaches VERTICAL surfaces, which is where the
+            // black-silhouette bark problem lives; the sky band is left alone because it mostly
+            // lands on the grass, which was already reading fine.
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = new Color(0.26f, 0.32f, 0.42f);    // cool sky fill
-            RenderSettings.ambientEquatorColor = new Color(0.28f, 0.26f, 0.21f); // warm bounce
-            RenderSettings.ambientGroundColor = new Color(0.12f, 0.11f, 0.08f);
+            RenderSettings.ambientSkyColor = new Color(0.33f, 0.40f, 0.52f);    // cool sky fill
+            RenderSettings.ambientEquatorColor = new Color(0.50f, 0.47f, 0.40f); // warm bounce
+            RenderSettings.ambientGroundColor = new Color(0.22f, 0.21f, 0.15f);
 
             // Outdoor haze so the background forest / verges melt into the horizon instead of
             // ending in a hard line. No opaque dome anymore, so nothing to clip against — the far
@@ -632,7 +651,14 @@ namespace Kinex.TheDasher.EditorTools
             floor.GetComponent<Renderer>().sharedMaterial = floorMat;
             ReceiveOnly(floor);
 
-            const float laneWidth = 0.92f, laneZ0 = -0.8f, laneZ1 = 7.2f;
+            // laneZ0 was -0.8, which ENDED THE LANES INSIDE THE SHOT. The camera sits at z=-4.1,
+            // 2.2 m up, pitched 10° down with a 54° vertical FOV, so the bottom edge of the frame
+            // meets the ground at z = -4.1 + 2.2/tan(37°) ≈ -1.18 — nearly half a metre in FRONT of
+            // where the lanes began. The result was a hard horizontal seam across the foreground:
+            // the mown strips and their cream edge lines just stopped, with bare floor below them.
+            // The strips are thin CUBES, so their end faces were lit head-on by the front fill and
+            // drew a bright line along the cut. Start them well behind the frame edge instead.
+            const float laneWidth = 0.92f, laneZ0 = -2.6f, laneZ1 = 7.2f;
             float laneLen = laneZ1 - laneZ0, laneCenterZ = (laneZ0 + laneZ1) * 0.5f;
             float[] laneXs = { -1.0f, 0f, 1.0f }; // must match DasherSpawner.laneSpacing
             // Warmed/lightened so the worn-dirt lane reads as clearly NOT-green against the
@@ -1605,17 +1631,26 @@ namespace Kinex.TheDasher.EditorTools
             bloom.scatter.Override(0.5f);
 
             var vignette = AddOverride<Vignette>(profile);
-            vignette.intensity.Override(0.12f);
+            // Halved from 0.12: it was darkening exactly the frame corners where the
+            // backlit treeline already falls away to near-black on device.
+            vignette.intensity.Override(0.06f);
             vignette.smoothness.Override(0.8f);
 
             var colors = AddOverride<ColorAdjustments>(profile);
-            // Saturation was +6 and exposure +0.15, carried over from the flat-colour primitive
-            // scene where it added life to untextured shapes. With real foliage textures it pushed
-            // the near leaves to a neon lime and flattened their detail — textured art needs far
-            // less help. A slight negative exposure also stops the sunlit canopy clipping to white.
-            colors.saturation.Override(-4f);
-            colors.contrast.Override(3f);
-            colors.postExposure.Override(-0.05f);
+            // Saturation went +6 -> -4 when real foliage textures replaced the flat-colour
+            // primitives, because +6 pushed the near leaves to a neon lime. -4 overcorrected:
+            // on device the park reads DRY and joyless, which is the opposite failure. +8 is
+            // the middle - enough to make a sunny park look sunny, short of the neon.
+            colors.saturation.Override(11f);
+            // Contrast eased 3 -> 2 so the exposure lift below is not immediately re-crushed
+            // back into the shadows.
+            colors.contrast.Override(2f);
+            // Was -0.05 to stop the sunlit canopy clipping. With Neutral tonemapping and the
+            // lower bloom threshold there is headroom, and the scene simply read dark.
+            // 0.20 in the headless render, +0.08 of deliberate headroom on top: the device has
+            // consistently read DARKER than the editor render, and this scene has now been called
+            // too dark twice.
+            colors.postExposure.Override(0.28f);
 
             var tonemap = AddOverride<Tonemapping>(profile);
             tonemap.mode.Override(TonemappingMode.Neutral);

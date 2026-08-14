@@ -40,9 +40,12 @@ namespace Kinex.TheDasher
                  "A camera-mirroring mismatch flips all three together — confirmed on-device: raising " +
                  "the real right hand raised the avatar's LEFT, stepping right moved the LEFT lane, " +
                  "and a right kick registered as a left kick. TRUE (default) applies the correction " +
-                 "that fixes that. If it's still backwards after this build, there is only one other " +
-                 "possible lateral convention — flip this ONE value to FALSE (restores the original, " +
-                 "pre-fix mapping) rather than hunting through the three call sites individually.")]
+                 "that fixes that. CAVEAT, learned the hard way: the three do NOT actually move " +
+                 "together. Kick side and the avatar retarget read MediaPipe's anatomical labels, " +
+                 "while the lane reads image-space x — different quantities, so each call site now " +
+                 "carries its own mapping under this flag. Flipping this value swaps all three at " +
+                 "once, which is almost never what a single wrong signal needs; fix the one that " +
+                 "is actually backwards at its own call site instead.")]
         public bool invertLateralForBackView = true;
 
         [Tooltip("TEMP tuning aid: shows an on-screen panel with 4 buttons to flip the avatar's " +
@@ -60,9 +63,14 @@ namespace Kinex.TheDasher
         [Tooltip("Body lean into a side-step, degrees.")]
         public float leanDegrees = 7f;
         [Tooltip("Scales how far the avatar visually slides between lanes (1 = full lane spacing). " +
-                 "Lower = the character moves less side-to-side while the lanes/items stay put. 0.65 " +
-                 "= 35% less travel. Cosmetic only — lane logic/scoring is unchanged.")]
-        public float avatarLaneMoveScale = 0.65f;
+                 "Keep this at 1: anything lower parks the avatar SHORT of the lane it is actually " +
+                 "in, and since items fall at the full lane x the player reads that gap as 'my " +
+                 "side-step didn't register'. Cosmetic only — lane logic/scoring is unchanged.")]
+        // Was 0.65, which stopped the avatar 35% short — visually halfway between two lanes while
+        // the scoring already counted it as fully arrived. Reported as "when I go left it doesn't
+        // go as much as it should". Items land at lane * laneSpacing (1.0) and both scene builders
+        // draw the mown strips at -1/0/+1, so the avatar must travel the full spacing to line up.
+        public float avatarLaneMoveScale = 1f;
         [Tooltip("How far the avatar's hips drop (metres) while the sit is held. Paired with the " +
                  "scripted knee bend below so the feet stay planted — together they read as a real " +
                  "crouch to pick up the tool. 0 = no dip.")]
@@ -269,9 +277,19 @@ namespace Kinex.TheDasher
             : (invertLateralForBackView ? _sideKick.JustKickedRight : _sideKick.JustKickedLeft);
         bool JustKickedRight => useKeyboardStub ? _stub.JustKickedRight
             : (invertLateralForBackView ? _sideKick.JustKickedLeft : _sideKick.JustKickedRight);
+        // LANE IS NOT LIKE THE OTHER TWO — the master flag's tooltip claims all three lateral
+        // signals flip together. They don't, and that is why stepping left used to move the
+        // avatar right while the arms and legs stayed correct:
+        //   - kick side + avatar retarget read MediaPipe's ANATOMICAL labels (LegAbductionDetector
+        //     uses LHip/LAnkle and only Mathf.Abs of the x gap), so "left" already means the
+        //     player's real left. Quake Escape does exactly this and is correct on device.
+        //   - the lane reads IMAGE-SPACE hip x. LaneDetector returns +1 for the +x side of the
+        //     FRAME and its own summary says "flipping Lane's sign is the caller's job".
+        // A front-facing player's real left sits at +x in the frame, so raw Lane is +1 for a step
+        // to their left — the opposite of this game's convention (-1 = left). Hence the negate.
         int PlayerLane => useKeyboardStub
             ? _stub.Lane
-            : (invertLateralForBackView ? _lane.Lane : -_lane.Lane);
+            : (invertLateralForBackView ? -_lane.Lane : _lane.Lane);
 
         void Awake()
         {
@@ -782,18 +800,26 @@ namespace Kinex.TheDasher
         // spawner is set to" and Easy/Hard stay proportionally more/less forgiving if those base
         // numbers are ever retuned. Easy = slower falls, more space between beats, more time to
         // react/claim/kick. Hard = the opposite. A small explicit table — no new manager class.
+        //
+        // Retuned per Pokpong: "make it fall MORE OFTEN but SLOWER, so the user has time to think of
+        // the pose and hold it." Those pull in opposite directions on the same clock, so fallMul went
+        // UP (a longer drop = a longer look at what's coming) while beatMul came DOWN (a shorter gap
+        // between drops). On Normal that is a 6.0 s fall every 2.98 s, so ~2 objects are in the air
+        // at once — which the spawner already expects and the meteor-storm rule still leaves one
+        // lane safe. windowMul went up as well: "hold the pose" is the ASK, and the window is how
+        // long a landed treasure / hovering kick ring waits for you.
         void ApplyDifficulty()
         {
             if (spawner == null) return;
             float fallMul, beatMul, windowMul, multiMeteor;
             switch (_difficulty)
             {
-                case DasherDifficulty.Easy: fallMul = 1.3f; beatMul = 1.05f; windowMul = 1.3f; multiMeteor = 0f; break;
-                case DasherDifficulty.Hard: fallMul = 0.85f; beatMul = 0.55f; windowMul = 0.7f; multiMeteor = 0.65f; break;
+                case DasherDifficulty.Easy: fallMul = 1.9f; beatMul = 0.85f; windowMul = 1.5f; multiMeteor = 0f; break;
+                case DasherDifficulty.Hard: fallMul = 1.2f; beatMul = 0.45f; windowMul = 0.9f; multiMeteor = 0.65f; break;
                 // Normal keeps the harder CADENCE (beats close together + frequent meteor storms so
                 // the player must step to a safe lane) but the fall SPEED is eased a touch (fallMul
                 // 0.88→1.0) — objects drop a little more gently everywhere per Pokpong's feedback.
-                default /* Normal */:      fallMul = 1.0f;  beatMul = 0.6f;  windowMul = 0.88f; multiMeteor = 0.45f; break;
+                default /* Normal */:      fallMul = 1.5f;  beatMul = 0.48f; windowMul = 1.15f; multiMeteor = 0.45f; break;
             }
             spawner.fallSeconds = _baseFallSeconds * fallMul;
             spawner.beatInterval = _baseBeatInterval * beatMul;
